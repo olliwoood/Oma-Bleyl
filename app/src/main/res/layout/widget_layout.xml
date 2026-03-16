@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_button"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:clickable="true"
+    android:focusable="true"
+    android:contentDescription="Assistent starten"
+    android:gravity="center_horizontal">
+
+    <!-- Uhrzeit oben (füllt verfügbaren Platz) -->
+    <TextClock
+        android:id="@+id/widget_clock"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:format24Hour="HH:mm"
+        android:format12Hour="HH:mm"
+        android:textColor="#1E293B"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:autoSizeTextType="uniform"
+        android:autoSizeMinTextSize="16sp"
+        android:autoSizeMaxTextSize="200sp"
+        android:autoSizeStepGranularity="4sp"
+        android:includeFontPadding="false"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp" />
+
+    <!-- Container für den runden Kreis -->
+    <FrameLayout
+        android:id="@+id/widget_circle_container"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="2"
+        android:padding="8dp">
+
+        <!-- Kreis als ImageView mit fitCenter = bleibt IMMER rund -->
+        <ImageView
+            android:id="@+id/widget_circle"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:src="@drawable/widget_bg_inactive"
+            android:scaleType="fitCenter"
+            android:importantForAccessibility="no" />
+
+        <!-- Mikrofon-Emoji zentriert über dem Kreis -->
+        <TextView
+            android:id="@+id/widget_icon"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="🎙️"
+            android:autoSizeTextType="uniform"
+            android:autoSizeMinTextSize="16sp"
+            android:autoSizeMaxTextSize="120sp"
+            android:autoSizeStepGranularity="4sp"
+            android:includeFontPadding="false" />
+
+    </FrameLayout>
+
+</LinearLayout>
