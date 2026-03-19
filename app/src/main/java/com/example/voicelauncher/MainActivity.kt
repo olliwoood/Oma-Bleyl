@@ -76,11 +76,14 @@ import kotlinx.coroutines.delay
 // --- ActionState für temporäre Icons ---
 object ActionStateHolder {
     val currentIcon = androidx.compose.runtime.mutableStateOf<String?>(null)
+    private var showCounter = 0
 
     fun showIcon(icon: String, durationMs: Long = 3000L) {
+        showCounter++
+        val myCounter = showCounter
         currentIcon.value = icon
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            if (currentIcon.value == icon) { // Verhindert Überschreiben bei schnellen aufeinanderfolgenden Aufrufen
+            if (showCounter == myCounter) {
                 currentIcon.value = null
             }
         }, durationMs)
@@ -91,7 +94,7 @@ class MainActivity : ComponentActivity() {
 
     private val audioRecorder = AudioRecorder()
     private val audioPlayer = AudioPlayer()
-    private val geminiClient = GeminiLiveClient(BuildConfig.GEMINI_API_KEY)
+    private val geminiClient by lazy { GeminiLiveClient(BuildConfig.GEMINI_API_KEY, this) }
     
     private var isSessionActive by mutableStateOf(false)
     private var pendingClientPrompt: String? = null
@@ -494,8 +497,10 @@ class MainActivity : ComponentActivity() {
                     val action = args["action"]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content ?: ""
                     val name = args["name"]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content ?: ""
                     val newName = args["newName"]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content
-                    val bDay = args["birthdayDay"]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content?.toIntOrNull()
-                    val bMonth = args["birthdayMonth"]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content?.toIntOrNull()
+                    val bDayRaw = args["birthdayDay"]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content
+                    val bDay = bDayRaw?.toIntOrNull() ?: bDayRaw?.toDoubleOrNull()?.toInt()
+                    val bMonthRaw = args["birthdayMonth"]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content
+                    val bMonth = bMonthRaw?.toIntOrNull() ?: bMonthRaw?.toDoubleOrNull()?.toInt()
 
                     var resultString = "Fehler: Unbekannte Aktion."
 
@@ -708,18 +713,17 @@ class MainActivity : ComponentActivity() {
                                             null,
                                             null
                                         )
-                                        if (calCursor != null) {
-                                            val idIdx = calCursor.getColumnIndex(android.provider.CalendarContract.Calendars._ID)
-                                            val nameIdx = calCursor.getColumnIndex(android.provider.CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
-                                            while (calCursor.moveToNext()) {
-                                                val cId = calCursor.getLong(idIdx)
-                                                val cName = calCursor.getString(nameIdx) ?: "?"
+                                        calCursor?.use { cc ->
+                                            val idIdx = cc.getColumnIndex(android.provider.CalendarContract.Calendars._ID)
+                                            val nameIdx = cc.getColumnIndex(android.provider.CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+                                            while (cc.moveToNext()) {
+                                                val cId = cc.getLong(idIdx)
+                                                val cName = cc.getString(nameIdx) ?: "?"
                                                 Log.d("MainActivity", "manage_calendar: Gefundener Kalender: id=$cId name=$cName")
                                                 if (calId == null) {
                                                     calId = cId // Den ersten verfügbaren nehmen
                                                 }
                                             }
-                                            calCursor.close()
                                         }
 
                                         Log.d("MainActivity", "manage_calendar: Gewählte calId=$calId")
@@ -824,7 +828,8 @@ class MainActivity : ComponentActivity() {
                     var resultString = ""
                     
                     val safeInt: (String) -> Int? = { key ->
-                        args[key]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content?.toIntOrNull()
+                        val raw = args[key]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content ?: null
+                        raw?.toIntOrNull() ?: raw?.toDoubleOrNull()?.toInt()
                     }
 
                     if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
@@ -915,7 +920,8 @@ class MainActivity : ComponentActivity() {
                     var resultString = ""
                     
                     val safeInt: (String) -> Int? = { key ->
-                        args[key]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content?.toIntOrNull()
+                        val raw = args[key]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content ?: null
+                        raw?.toIntOrNull() ?: raw?.toDoubleOrNull()?.toInt()
                     }
 
                     if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
@@ -945,56 +951,58 @@ class MainActivity : ComponentActivity() {
                                 "${android.provider.CalendarContract.Events.DTSTART} ASC"
                             )
 
-                            if (cursor != null && cursor.moveToFirst()) {
-                                val eventId = cursor.getLong(0)
-                                val oldStart = cursor.getLong(1)
-                                val oldEnd = cursor.getLong(2)
-                                val calId = cursor.getLong(3)
-                                cursor.close()
+                            cursor?.use { c ->
+                                if (c.moveToFirst()) {
+                                    val eventId = c.getLong(0)
+                                    val oldStart = c.getLong(1)
+                                    val oldEnd = c.getLong(2)
+                                    val calId = c.getLong(3)
 
-                                val calStart = java.util.Calendar.getInstance().apply { timeInMillis = oldStart }
-                                val oldDurationMinutes = ((oldEnd - oldStart) / (60 * 1000L)).toInt()
+                                    val calStart = java.util.Calendar.getInstance().apply { timeInMillis = oldStart }
+                                    val oldDurationMinutes = ((oldEnd - oldStart) / (60 * 1000L)).toInt()
 
-                                // Falls Werte übergeben wurden, überschreiben wir die alten:
-                                val finalYear = newYear ?: calStart.get(java.util.Calendar.YEAR)
-                                val finalMonth = newMonth ?: (calStart.get(java.util.Calendar.MONTH) + 1)
-                                val finalDay = newDay ?: calStart.get(java.util.Calendar.DAY_OF_MONTH)
-                                val finalHour = newHour ?: calStart.get(java.util.Calendar.HOUR_OF_DAY)
-                                val finalMinute = newMinute ?: calStart.get(java.util.Calendar.MINUTE)
-                                val finalDuration = newDurationMinutes ?: oldDurationMinutes
+                                    // Falls Werte übergeben wurden, überschreiben wir die alten:
+                                    val finalYear = newYear ?: calStart.get(java.util.Calendar.YEAR)
+                                    val finalMonth = newMonth ?: (calStart.get(java.util.Calendar.MONTH) + 1)
+                                    val finalDay = newDay ?: calStart.get(java.util.Calendar.DAY_OF_MONTH)
+                                    val finalHour = newHour ?: calStart.get(java.util.Calendar.HOUR_OF_DAY)
+                                    val finalMinute = newMinute ?: calStart.get(java.util.Calendar.MINUTE)
+                                    val finalDuration = newDurationMinutes ?: oldDurationMinutes
 
-                                val newCal = java.util.Calendar.getInstance()
-                                // Achtung: Monat ist 0-basiert in Calendar
-                                newCal.set(finalYear, finalMonth - 1, finalDay, finalHour, finalMinute, 0)
-                                newCal.set(java.util.Calendar.MILLISECOND, 0)
-                                
-                                val newStartMillis = newCal.timeInMillis
-                                val newEndMillis = newStartMillis + (finalDuration * 60 * 1000L)
+                                    val newCal = java.util.Calendar.getInstance()
+                                    // Achtung: Monat ist 0-basiert in Calendar
+                                    newCal.set(finalYear, finalMonth - 1, finalDay, finalHour, finalMinute, 0)
+                                    newCal.set(java.util.Calendar.MILLISECOND, 0)
+                                    
+                                    val newStartMillis = newCal.timeInMillis
+                                    val newEndMillis = newStartMillis + (finalDuration * 60 * 1000L)
 
-                                // Altes Event löschen
-                                val uriToDelete = android.content.ContentUris.withAppendedId(android.provider.CalendarContract.Events.CONTENT_URI, eventId)
-                                contentResolver.delete(uriToDelete, null, null)
+                                    // Altes Event löschen
+                                    val uriToDelete = android.content.ContentUris.withAppendedId(android.provider.CalendarContract.Events.CONTENT_URI, eventId)
+                                    contentResolver.delete(uriToDelete, null, null)
 
-                                // Neues Event einfügen
-                                val values = android.content.ContentValues().apply {
-                                    put(android.provider.CalendarContract.Events.DTSTART, newStartMillis)
-                                    put(android.provider.CalendarContract.Events.DTEND, newEndMillis)
-                                    put(android.provider.CalendarContract.Events.TITLE, title)
-                                    put(android.provider.CalendarContract.Events.CALENDAR_ID, calId)
-                                    put(android.provider.CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().id)
-                                }
-                                val uri = contentResolver.insert(android.provider.CalendarContract.Events.CONTENT_URI, values)
-                                
-                                if (uri != null) {
-                                    ActionStateHolder.showIcon("📅")
-                                    val minStr = finalMinute.toString().padStart(2, '0')
-                                    resultString = "OK, '$title' verschoben auf $finalDay.$finalMonth.$finalYear um $finalHour:$minStr."
+                                    // Neues Event einfügen
+                                    val values = android.content.ContentValues().apply {
+                                        put(android.provider.CalendarContract.Events.DTSTART, newStartMillis)
+                                        put(android.provider.CalendarContract.Events.DTEND, newEndMillis)
+                                        put(android.provider.CalendarContract.Events.TITLE, title)
+                                        put(android.provider.CalendarContract.Events.CALENDAR_ID, calId)
+                                        put(android.provider.CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().id)
+                                    }
+                                    val uri = contentResolver.insert(android.provider.CalendarContract.Events.CONTENT_URI, values)
+                                    
+                                    if (uri != null) {
+                                        ActionStateHolder.showIcon("📅")
+                                        val minStr = finalMinute.toString().padStart(2, '0')
+                                        resultString = "OK, '$title' verschoben auf $finalDay.$finalMonth.$finalYear um $finalHour:$minStr."
+                                    } else {
+                                        resultString = "Fehler: Alter Termin gelöscht, aber neuer konnte nicht gespeichert werden!"
+                                    }
                                 } else {
-                                    resultString = "Fehler: Alter Termin gelöscht, aber neuer konnte nicht gespeichert werden!"
+                                    resultString = "Fehler: Es konnte kein bestehender Termin mit Titel '$title' gefunden werden."
                                 }
-                            } else {
-                                cursor?.close()
-                                resultString = "Fehler: Es konnte kein bestehender Termin mit Titel '$title' gefunden werden."
+                            } ?: run {
+                                resultString = "Fehler: Kalenderabfrage fehlgeschlagen."
                             }
                         } catch (e: Exception) {
                             Log.e("MainActivity", "reschedule_calendar_event fehlgeschlagen", e)
@@ -1596,14 +1604,18 @@ class MainActivity : ComponentActivity() {
         val dateFormat = java.text.SimpleDateFormat("EEEE, dd. MMMM yyyy, HH:mm", java.util.Locale.GERMANY).also { it.timeZone = java.util.TimeZone.getTimeZone("Europe/Berlin") }
         val currentDate = dateFormat.format(java.util.Date())
 
-        var systemPrompt = """Du bist ein freundlicher, geduldiger junger Mann, der einer älteren, blinden Dame im Alltag hilft. Warmherzig, locker, respektvoll. Du siezt sie ('Sie'/'Ihnen'), herzlich und natürlich. Kurze, klare Sätze – sie ist blind, lange Schachtelsätze sind schwer zu folgen. Lebendiger Tonfall, abwechslungsreich, keine Standardfloskeln. Keine Emojis, keine *Sternchen-Handlungen*. Bei Tool-Nutzung kurz und natürlich auf Deutsch erklären. NIE englische Systemmeldungen aussprechen. Bei Terminänderungen IMMER erst ankündigen, dann Tool aufrufen. SMS von unbekannter Nummer: wenn Absender sich namentlich vorstellt, Kontakt EIGENSTÄNDIG speichern (manage_contacts). Die App kann KEINE SMS senden, KEINE Kontakte löschen und KEINE Telefonnummern bearbeiten. Es ist gerade $currentDate.""".trimIndent()
+        var systemPrompt = """Du bist ein freundlicher, geduldiger junger Mann, der einer älteren, blinden Dame im Alltag hilft. Warmherzig, locker, respektvoll. Du siezt sie ('Sie'/'Ihnen'), herzlich und natürlich. Kurze, klare Sätze – sie ist blind, lange Schachtelsätze sind schwer zu folgen. Lebendiger Tonfall, abwechslungsreich, keine Standardfloskeln. Keine Emojis, keine *Sternchen-Handlungen*. Bei Tool-Nutzung kurz und natürlich auf Deutsch erklären. NIE englische Systemmeldungen aussprechen. Die App kann KEINE SMS senden, KEINE Kontakte löschen und KEINE Telefonnummern bearbeiten. Es ist gerade $currentDate.""".trimIndent()
 
-        systemPrompt += " REGELN: 1) Eigenständig handeln! Wenn die Nutzerin etwas will, sofort tun – NICHT nachfragen. 2) Kurz erwähnen, was du tust. 3) Nie stumm bleiben. 4) WICHTIG – AUTOMATISCH MERKEN: Wenn die Nutzerin persönliche Informationen erwähnt (Familie, Beziehungen, Vorlieben, Gewohnheiten, wichtige Fakten), SOFORT mit handle_memory speichern – OHNE nachzufragen! Beispiele: 'Jörg ist mein Sohn' → speichere 'Sohn = Jörg'. 'Ich trinke gern Kaffee' → speichere 'Trinkt gern Kaffee'. 'Meine Schwester heißt Ingrid' → speichere 'Schwester = Ingrid'. So kannst du bei 'ruf meinen Sohn an' sofort Jörg anrufen. 5) VERKNÜPFUNG: Wenn die Nutzerin nach Infos über eine Person fragt (z.B. 'Wann hat mein Sohn Geburtstag?'), nutze dein Wissen aus den Erinnerungen (z.B. Sohn = Jörg) UND schlage im Kontakt nach (manage_contacts mit action=get), um Geburtstag etc. zu finden. 6) FLEXIBLE KONTAKTSUCHE: Kontakte können unter verschiedenen Namen gespeichert sein! Wenn du jemanden nicht findest, probiere Varianten: Mutter→Mama/Mutti, Vater→Papa/Papi, Schwester→Vorname, etc. Nutze im Zweifel get_contact_list, um alle Kontakte zu sehen und den richtigen zu finden. manage_contacts ist NUR für Name und Geburtstag. 7) SESSION BEENDEN: Wenn das Gespräch abgeschlossen ist (Nutzerin sagt 'ja', 'danke', 'das war's', 'tschüss', oder bestätigt dass alles erledigt ist), IMMER stop_audio_session aufrufen! Verabschiede dich kurz und herzlich, dann beende die Session."
+        systemPrompt += " REGELN: 1) Nutze gesunden Menschenverstand! Bei einfachen Dingen (Wetter, Uhrzeit, Anruf) direkt handeln. Bei wichtigen Aktionen (Termine anlegen, Kontakte ändern) kurz die Details bestätigen lassen. 2) Kurz erwähnen, was du tust. 3) Nie stumm bleiben. 4) WICHTIG – AUTOMATISCH MERKEN: Wenn die Nutzerin persönliche Informationen erwähnt (Familie, Beziehungen, Vorlieben, Gewohnheiten, wichtige Fakten), SOFORT mit handle_memory speichern – OHNE nachzufragen! Beispiele: 'Jörg ist mein Sohn' → speichere 'Sohn = Jörg'. 'Ich trinke gern Kaffee' → speichere 'Trinkt gern Kaffee'. 'Meine Schwester heißt Ingrid' → speichere 'Schwester = Ingrid'. So kannst du bei 'ruf meinen Sohn an' sofort Jörg anrufen. 5) VERKNÜPFUNG: Wenn die Nutzerin nach Infos über eine Person fragt (z.B. 'Wann hat mein Sohn Geburtstag?'), nutze dein Wissen aus den Erinnerungen (z.B. Sohn = Jörg) UND schlage im Kontakt nach (manage_contacts mit action=get), um Geburtstag etc. zu finden. 6) FLEXIBLE KONTAKTSUCHE: Kontakte können unter verschiedenen Namen gespeichert sein! Wenn du jemanden nicht findest, probiere Varianten: Mutter→Mama/Mutti, Vater→Papa/Papi, Schwester→Vorname, etc. Nutze im Zweifel get_contact_list, um alle Kontakte zu sehen und den richtigen zu finden. manage_contacts ist NUR für Name und Geburtstag. 7) SESSION BEENDEN: Wenn die Aufgabe erledigt ist und die Nutzerin nichts weiteres braucht, verabschiede dich herzlich und rufe stop_audio_session auf. Wenn du fragst ob noch etwas ist, warte auf die Antwort bevor du beendest."
 
         // Kontext direkt einbauen (kein Tool-Call nötig!)
-        val context = buildContextResponse()
-        if (context != "Kein Kontext vorhanden.") {
-            systemPrompt += " AKTUELLER KONTEXT: $context"
+        try {
+            val context = buildContextResponse()
+            if (context != "Kein Kontext vorhanden.") {
+                systemPrompt += " AKTUELLER KONTEXT: $context"
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Fehler beim Erstellen des Kontexts für System-Prompt", e)
         }
 
         // Ungelesene Notification – zeitkritisch
@@ -1638,17 +1650,19 @@ class MainActivity : ComponentActivity() {
             parts.add("LETZTE EREIGNISSE:\n$recentLogs")
         }
 
-        // Geburtstage
-        val cal = java.util.Calendar.getInstance()
-        val currentDay = cal.get(java.util.Calendar.DAY_OF_MONTH)
-        val currentMonth = cal.get(java.util.Calendar.MONTH) + 1
+        // Geburtstage – prüfe die nächsten 3 Tage (auch über Monatsgrenzen hinweg)
         try {
             val birthdays = getNativeBirthdays()
+            // Erzeuge die nächsten 4 Tage als (Tag, Monat)-Paare
+            val upcomingDays = (0..3).map { offset ->
+                val c = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_MONTH, offset) }
+                Pair(c.get(java.util.Calendar.DAY_OF_MONTH), c.get(java.util.Calendar.MONTH) + 1)
+            }
             val birthdaysText = birthdays.filter { (_, dateStr) ->
                 val dateParts = dateStr.removeSuffix(".").split(".")
                 val bDay = dateParts.getOrNull(0)?.toIntOrNull()
                 val bMonth = dateParts.getOrNull(1)?.toIntOrNull()
-                bMonth == currentMonth && bDay != null && bDay in currentDay..(currentDay+3)
+                bDay != null && bMonth != null && upcomingDays.any { it.first == bDay && it.second == bMonth }
             }.joinToString(", ") { "${it.first} (am ${it.second})" }
             if (birthdaysText.isNotEmpty()) {
                 parts.add("GEBURTSTAGE bald: $birthdaysText. Wenn heute, sofort erinnern!")
@@ -1767,6 +1781,14 @@ class MainActivity : ComponentActivity() {
         audioRecorder.stopRecording()
         audioPlayer.stopAndRelease()
         geminiClient.disconnect()
+        
+        // Singleton-Callbacks aufräumen, damit keine tote Activity referenziert wird
+        CallStateHolder.onCallSummaryReady = null
+        CallStateHolder.onIncomingCallReady = null
+        CallStateHolder.onToggleSpeaker = null
+        AlarmStateHolder.onAlarmTriggered = null
+        AlarmStateHolder.onAlarmDismissedByUser = null
+        VoiceLauncherWidget.onToggleAssistant = null
     }
 
     private fun requestDefaultDialerRole() {

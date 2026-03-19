@@ -1,11 +1,15 @@
 package com.example.voicelauncher.audio
 
+import android.content.Context
+import android.content.pm.PackageManager
 import android.util.Base64
 import android.util.Log
 import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
 import okhttp3.*
 import okio.ByteString
+import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 
 /**
  * Tool-Gruppen für dynamisches Laden.
@@ -20,13 +24,22 @@ enum class ToolGroup {
     WEATHER         // get_weather
 }
 
-class GeminiLiveClient(private val apiKey: String) {
+class GeminiLiveClient(private val apiKey: String, private val context: Context? = null) {
 
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .pingInterval(15, TimeUnit.SECONDS)   // Keepalive gegen Connection-Drops
+        .readTimeout(0, TimeUnit.MILLISECONDS) // Kein Read-Timeout für Streaming
+        .build()
     private var webSocket: WebSocket? = null
     var isSetupComplete = false
         private set
     private var isUserDisconnect = false
+    
+    // Für Auto-Reconnect bei unerwartetem Abbruch
+    private var lastSystemPrompt: String? = null
+    private var lastToolGroups: Set<ToolGroup>? = null
+    private var reconnectAttempts = 0
+    private val maxReconnectAttempts = 3
     
     // Aktuell geladene Tool-Gruppen für die laufende Session
     private var activeToolGroups = mutableSetOf<ToolGroup>()
@@ -50,13 +63,32 @@ class GeminiLiveClient(private val apiKey: String) {
 
 
     fun connect(systemPrompt: String, toolGroups: Set<ToolGroup> = setOf(ToolGroup.CORE)) {
+        // Schutz gegen Zombie-Reconnect: Wenn disconnect() schon aufgerufen wurde,
+        // aber ein postDelayed-Timer noch connect() auslöst → abbrechen.
+        if (isUserDisconnect) {
+            Log.w("GeminiLiveClient", "connect() abgebrochen – disconnect() wurde bereits aufgerufen")
+            return
+        }
+        
         activeToolGroups = toolGroups.toMutableSet()
+        lastSystemPrompt = systemPrompt
+        lastToolGroups = toolGroups
+        reconnectAttempts = 0
         
         val url = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=$apiKey"
         
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(url)
-            .build()
+        
+        // Android-Identifikation hinzufügen für API-Key-Einschränkung
+        context?.let { ctx ->
+            requestBuilder.header("X-Android-Package", ctx.packageName)
+            getAppCertFingerprint(ctx)?.let { fingerprint ->
+                requestBuilder.header("X-Android-Cert", fingerprint)
+            }
+        }
+        
+        val request = requestBuilder.build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -84,12 +116,62 @@ class GeminiLiveClient(private val apiKey: String) {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e("GeminiLiveClient", "WebSocket Error: ${t.message}", t)
                 isSetupComplete = false
+                isGeminiSpeaking = false
+                
+                if (!isUserDisconnect && reconnectAttempts < maxReconnectAttempts) {
+                    val prompt = lastSystemPrompt
+                    val groups = lastToolGroups
+                    if (prompt != null && groups != null) {
+                        reconnectAttempts++
+                        Log.w("GeminiLiveClient", "Verbindung verloren, Reconnect-Versuch $reconnectAttempts/$maxReconnectAttempts...")
+                        // Kurz warten, dann neu verbinden
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            connect(prompt, groups)
+                        }, 1500L * reconnectAttempts) // Progressives Delay
+                        return
+                    }
+                }
+                
                 if (!isUserDisconnect) {
+                    if (reconnectAttempts >= maxReconnectAttempts) {
+                        Log.e("GeminiLiveClient", "Alle $maxReconnectAttempts Reconnect-Versuche fehlgeschlagen.")
+                    }
                     onDisconnected?.invoke()
                 }
                 isUserDisconnect = false
             }
         })
+    }
+    
+    /**
+     * Liest das SHA-1 Zertifikat-Fingerprint der App-Signatur aus.
+     * Wird für die API-Key-Einschränkung (X-Android-Cert Header) benötigt.
+     */
+    private fun getAppCertFingerprint(ctx: Context): String? {
+        return try {
+            val packageInfo = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                ctx.packageManager.getPackageInfo(ctx.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+            } else {
+                @Suppress("DEPRECATION")
+                ctx.packageManager.getPackageInfo(ctx.packageName, PackageManager.GET_SIGNATURES)
+            }
+            
+            val signatures = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                packageInfo.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.signatures
+            }
+            
+            signatures?.firstOrNull()?.let { signature ->
+                val md = MessageDigest.getInstance("SHA-1")
+                val digest = md.digest(signature.toByteArray())
+                digest.joinToString("") { "%02X".format(it) }
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiLiveClient", "Fehler beim Lesen des App-Zertifikats", e)
+            null
+        }
     }
     
     private fun sendInitialSetup(systemPrompt: String) {
@@ -124,7 +206,11 @@ class GeminiLiveClient(private val apiKey: String) {
             })
         }
         val msgStr = setupMessage.toString()
-        webSocket?.send(msgStr)
+        try {
+            webSocket?.send(msgStr)
+        } catch (e: Exception) {
+            Log.e("GeminiLiveClient", "Setup-Nachricht konnte nicht gesendet werden", e)
+        }
         Log.d("GeminiLiveClient", "Sent setup (${msgStr.length} chars, ${activeToolGroups.size} groups, prompt=${systemPrompt.length} chars)")
     }
     
@@ -396,12 +482,11 @@ class GeminiLiveClient(private val apiKey: String) {
     }
 
     fun sendAudio(pcmData: ByteArray) {
-        if (webSocket == null || !isSetupComplete) return
+        val ws = webSocket ?: return
+        if (!isSetupComplete) return
         
         // Kein Audio senden während Gemini spricht → verhindert interrupted-Kaskade
         if (isGeminiSpeaking) return
-        
-
         
         val base64Audio = Base64.encodeToString(pcmData, Base64.NO_WRAP)
         
@@ -416,11 +501,16 @@ class GeminiLiveClient(private val apiKey: String) {
             })
         }
         
-        webSocket?.send(message.toString())
+        try {
+            ws.send(message.toString())
+        } catch (e: Exception) {
+            Log.w("GeminiLiveClient", "sendAudio fehlgeschlagen (WebSocket geschlossen?): ${e.message}")
+        }
     }
 
     fun sendClientContent(text: String) {
-        if (webSocket == null || !isSetupComplete) return
+        val ws = webSocket ?: return
+        if (!isSetupComplete) return
         
         val message = buildJsonObject {
             put("clientContent", buildJsonObject {
@@ -436,8 +526,12 @@ class GeminiLiveClient(private val apiKey: String) {
             })
         }
         
-        webSocket?.send(message.toString())
-        Log.d("GeminiLiveClient", "Sent client content: $text")
+        try {
+            ws.send(message.toString())
+            Log.d("GeminiLiveClient", "Sent client content: $text")
+        } catch (e: Exception) {
+            Log.w("GeminiLiveClient", "sendClientContent fehlgeschlagen (WebSocket geschlossen?): ${e.message}")
+        }
     }
 
     private fun handleIncomingMessage(jsonString: String) {
@@ -496,6 +590,8 @@ class GeminiLiveClient(private val apiKey: String) {
             
             // Top-Level ToolCall abfangen (Gemini sendet diese SEPARAT, nicht in serverContent!)
             jsonResponse["toolCall"]?.jsonObject?.let { toolCall ->
+                // Tool Call = Gemini hat aufgehört zu sprechen
+                isGeminiSpeaking = false
                 toolCall["functionCalls"]?.jsonArray?.forEach { fc ->
                     val call = fc.jsonObject
                     val name = call["name"]?.jsonPrimitive?.content
@@ -529,11 +625,18 @@ class GeminiLiveClient(private val apiKey: String) {
                 })
             })
         }
-        webSocket?.send(message.toString())
+        try {
+            webSocket?.send(message.toString())
+        } catch (e: Exception) {
+            Log.w("GeminiLiveClient", "Tool-Response konnte nicht gesendet werden", e)
+        }
     }
 
     fun disconnect() {
         isUserDisconnect = true
+        reconnectAttempts = maxReconnectAttempts // Verhindert Auto-Reconnect
+        lastSystemPrompt = null
+        lastToolGroups = null
         webSocket?.close(1000, "User disconnected")
         webSocket = null
         isSetupComplete = false

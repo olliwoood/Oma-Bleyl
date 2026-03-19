@@ -47,15 +47,9 @@ class CallService : InCallService() {
         currentCall = call
         call.registerCallback(callCallback)
         
-        val intent = android.content.Intent(this, com.example.voicelauncher.MainActivity::class.java).apply {
-            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("SHOW_CALL_SCREEN", true)
-        }
-        try {
-            startActivity(intent)
-        } catch (e: Exception) {
-            Log.e("CallService", "Failed to start MainActivity for call UI", e)
-        }
+        // Full-Screen Notification statt direktem startActivity() verwenden,
+        // da Android 14+ Background Activity Launches blockiert.
+        showCallNotification(call)
         
         val details = call.details
         val handle = details?.handle
@@ -184,7 +178,7 @@ class CallService : InCallService() {
                     }
                 }
                 append(durationStr)
-                append(" Das Mikrofon ist noch aktiv, die Nutzerin hört dich.")
+                append(" Das Mikrofon ist noch aktiv, die Nutzerin hört dich. Fasse den Anruf kurz zusammen und frag ob sie noch etwas braucht. Beende die Session NICHT von dir aus – die Nutzerin könnte Folgeanweisungen haben!")
             }
             
             val logEvent = buildString {
@@ -213,7 +207,10 @@ class CallService : InCallService() {
         
         CallStateHolder.callState.value = CallStateHolder.State.DISCONNECTED
         android.os.Handler(mainLooper).postDelayed({
-            CallStateHolder.reset()
+            // Nur zurücksetzen, wenn kein neuer Anruf in der Zwischenzeit hereingekommen ist
+            if (currentCall == null) {
+                CallStateHolder.reset()
+            }
             // Zurück zum Homescreen (App minimieren, Widget bleibt sichtbar)
             // Gemini-Session läuft im Hintergrund weiter (Mikro bleibt aktiv)
             try {

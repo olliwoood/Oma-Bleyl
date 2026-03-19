@@ -28,10 +28,10 @@ class AppUpdater(private val context: Context) {
     companion object {
         private const val TAG = "AppUpdater"
 
-        // ─── HIER DEINE GITHUB-DATEN EINTRAGEN ───
-        private const val GITHUB_OWNER = "DEIN_USERNAME"   // z.B. "oliverwirthgen"
-        private const val GITHUB_REPO = "DEIN_REPO_NAME"   // z.B. "oma-bleyl"
-        // ──────────────────────────────────────────
+        // ─── GITHUB-DATEN ───
+        private const val GITHUB_OWNER = "olliwoood"
+        private const val GITHUB_REPO = "Oma-Bleyl"
+        // ────────────────────
 
         private const val API_URL =
             "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"

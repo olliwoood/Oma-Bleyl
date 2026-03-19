@@ -14,6 +14,7 @@ class AudioRecorder {
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
     private val isRecording = AtomicBoolean(false)
+    private var recordThread: Thread? = null
     
     // Gemini Live API expects 16kHz, 16-bit, Mono PCM
     private val sampleRate = 16000
@@ -76,7 +77,7 @@ class AudioRecorder {
         audioRecord?.startRecording()
         isRecording.set(true)
 
-        Thread {
+        recordThread = Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             // Live API präferiert exakte Chunks, oft 1024 oder 2048 für flottes Streaming
             val chunkSize = 2048
@@ -95,13 +96,28 @@ class AudioRecorder {
                     Log.e("AudioRecorder", "Error reading audio: $readStatus")
                 }
             }
-        }.start()
+        }.apply {
+            name = "AudioRecordThread"
+            start()
+        }
     }
 
     fun stopRecording() {
-        if (!isRecording.get()) return
-        isRecording.set(false)
-        audioRecord?.stop()
+        if (!isRecording.getAndSet(false)) return
+        
+        // Thread zuerst beenden lassen, bevor AudioRecord released wird
+        try {
+            recordThread?.join(1000)
+        } catch (e: InterruptedException) {
+            Log.w("AudioRecorder", "RecordThread join interrupted")
+        }
+        recordThread = null
+        
+        try {
+            audioRecord?.stop()
+        } catch (e: Exception) {
+            Log.w("AudioRecorder", "Fehler beim Stoppen von AudioRecord", e)
+        }
         audioRecord?.release()
         audioRecord = null
         releaseAudioEffects()

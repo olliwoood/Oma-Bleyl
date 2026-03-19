@@ -152,7 +152,14 @@ class AudioPlayer {
 
     private fun stopPlayThread() {
         isPlaying = false
-        playThread?.interrupt()
+        playThread?.let { thread ->
+            thread.interrupt()
+            try {
+                thread.join(500)
+            } catch (e: InterruptedException) {
+                Log.w("AudioPlayer", "PlayThread join interrupted")
+            }
+        }
         playThread = null
         audioQueue.clear()
     }
@@ -169,9 +176,10 @@ class AudioPlayer {
         stopPlayThread()
         try {
             audioTrack?.apply {
-                if (playState == AudioTrack.PLAYSTATE_PLAYING) {
-                    flush() // Restliche Samples sauber ausgeben
+                try {
                     stop()
+                } catch (_: IllegalStateException) {
+                    // Bereits gestoppt – ignorieren
                 }
                 release()
             }

@@ -179,6 +179,8 @@ class AlarmService : Service() {
             .setContentText(label)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentIntent(pendingIntent)
+            .setFullScreenIntent(pendingIntent, true)
+            .setCategory(Notification.CATEGORY_ALARM)
             .setOngoing(true)
             .build()
     }

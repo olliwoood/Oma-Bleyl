@@ -53,10 +53,7 @@
             android:layout_height="match_parent"
             android:gravity="center"
             android:text="🎙️"
-            android:autoSizeTextType="uniform"
-            android:autoSizeMinTextSize="16sp"
-            android:autoSizeMaxTextSize="120sp"
-            android:autoSizeStepGranularity="4sp"
+            android:textSize="72sp"
             android:includeFontPadding="false" />
 
     </FrameLayout>

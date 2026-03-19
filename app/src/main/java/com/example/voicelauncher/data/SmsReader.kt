@@ -59,9 +59,14 @@ class SmsReader(private val context: Context) {
         val sortOrder = "${Telephony.Sms.DATE} DESC"
 
         try {
-            // Hole mehr als nötig, da der Filter für die Nummer im Code meist robuster ist
-            // als ein exaktes Match im SQL (wegen Ländercodes etc.)
-            context.contentResolver.query(uri, projection, null, null, sortOrder)?.use { cursor ->
+            // SQL-Vorfilter: Letzte 7 Ziffern der Nummer matchen (ignoriert Ländercode-Unterschiede).
+            // Der robustere PhoneNumberUtils.compare() filtert danach im Code exakt.
+            val digitsOnly = phoneNumber.filter { it.isDigit() }
+            val lastDigits = if (digitsOnly.length >= 7) digitsOnly.takeLast(7) else digitsOnly
+            val selection = "${Telephony.Sms.ADDRESS} LIKE ?"
+            val selectionArgs = arrayOf("%$lastDigits%")
+            
+            context.contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)?.use { cursor ->
                 val addressIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
                 val bodyIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.BODY)
                 val dateIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.DATE)

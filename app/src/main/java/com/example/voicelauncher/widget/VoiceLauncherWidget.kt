@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.util.TypedValue
 import android.widget.RemoteViews
 import com.example.voicelauncher.R
 
@@ -47,6 +48,13 @@ class VoiceLauncherWidget : AppWidgetProvider() {
             val icon = if (isActive) "🎤" else "🎙️"
             views.setTextViewText(R.id.widget_icon, icon)
 
+            // Emoji-Größe dynamisch aus Widget-Höhe berechnen
+            val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
+            val minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
+            // Kreis = 2/3 der Höhe, Emoji ≈ 70 % des Kreisdurchmessers
+            val emojiSizeDp = (minH * 2f / 3f * 0.7f).coerceIn(28f, 200f)
+            views.setTextViewTextSize(R.id.widget_icon, TypedValue.COMPLEX_UNIT_DIP, emojiSizeDp)
+
             // Content Description
             val desc = if (isActive) "Assistent ist aktiv. Tippen zum Stoppen." else "Assistent starten"
             views.setContentDescription(R.id.widget_button, desc)
@@ -73,6 +81,15 @@ class VoiceLauncherWidget : AppWidgetProvider() {
         for (appWidgetId in appWidgetIds) {
             updateAppWidget(context, appWidgetManager, appWidgetId, isActive = lastKnownActive)
         }
+    }
+
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle
+    ) {
+        updateAppWidget(context, appWidgetManager, appWidgetId, lastKnownActive)
     }
 
     override fun onReceive(context: Context, intent: Intent) {

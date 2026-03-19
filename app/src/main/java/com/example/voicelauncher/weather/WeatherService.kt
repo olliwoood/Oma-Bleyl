@@ -54,7 +54,9 @@ object WeatherService {
 
             val request = Request.Builder().url(weatherUrl).build()
             val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: return "Fehler: Keine Antwort vom Wetterdienst."
+            val body = response.use { resp ->
+                resp.body?.string() ?: return "Fehler: Keine Antwort vom Wetterdienst."
+            }
 
             Log.d(TAG, "Weather API response for $lat, $lon: ${body.take(500)}")
 
@@ -142,7 +144,9 @@ object WeatherService {
 
         val request = Request.Builder().url(geoUrl).build()
         val response = client.newCall(request).execute()
-        val body = response.body?.string() ?: return null
+        val body = response.use { resp ->
+            resp.body?.string() ?: return null
+        }
 
         Log.d(TAG, "Geocoding response for '$city': ${body.take(300)}")
 

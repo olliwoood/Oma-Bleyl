@@ -8,7 +8,7 @@ import android.util.Log
 class NotificationReaderService : NotificationListenerService() {
 
     companion object {
-        var latestNotification: String? = null
+        @Volatile var latestNotification: String? = null
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
@@ -22,7 +22,7 @@ class NotificationReaderService : NotificationListenerService() {
                 val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
                 
                 if (title != null && text != null) {
-                    val message = "Neue Nachricht von \$title: \$text"
+                    val message = "Neue Nachricht von $title: $text"
                     Log.d("NotificationReader", message)
                     
                     // Speichern der letzten Nachricht im Companion Object (sehr simpel für MVP)
