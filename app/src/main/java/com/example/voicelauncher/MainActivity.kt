@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
     
     private var isSessionActive by mutableStateOf(false)
     private var pendingClientPrompt: String? = null
+    private var lastCallStartedMs = 0L
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -1090,15 +1091,24 @@ class MainActivity : ComponentActivity() {
                     
                     Log.d("MainActivity", "Tool Called: make_phone_call -> Query: '$queryStr', Bereinigt: '$searchStr'")
                     
-                    if (searchStr.isNotEmpty()) {
+                    // Debounce: Doppelte Anrufe innerhalb von 10 Sekunden verhindern
+                    val now = System.currentTimeMillis()
+                    if (now - lastCallStartedMs < 10_000) {
+                        Log.w("MainActivity", "make_phone_call ignoriert – Anruf wurde bereits vor ${now - lastCallStartedMs}ms gestartet")
+                        resultString = "Ein Anruf wurde bereits gestartet. Bitte warte einen Moment."
+                    } else if (searchStr.isNotEmpty()) {
                         val result = findNativeContactWithPhone(searchStr)
 
-                        if (result != null) {
+                        if (result != null && result.first == "AMBIGUOUS") {
+                            // Mehrere Kontakte gefunden → Gemini soll nachfragen
+                            resultString = "Mehrere Kontakte gefunden: ${result.second}. Frage die Nutzerin, welchen sie meint."
+                        } else if (result != null) {
                             try {
                                 val telecomManager = getSystemService(android.telecom.TelecomManager::class.java)
                                 val callUri = android.net.Uri.parse("tel:${result.second}")
                                 
                                 if (androidx.core.app.ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                                    lastCallStartedMs = now
                                     ActionStateHolder.showIcon("📞")
                                     resultString = "done"
                                     com.example.voicelauncher.data.SessionLog.addEvent(applicationContext, "Ausgehender Anruf an ${result.first} gestartet")
@@ -1107,11 +1117,6 @@ class MainActivity : ComponentActivity() {
                                         audioRecorder.stopRecording()
                                         isSessionActive = false
                                         CallStateHolder.callerName.value = result.first
-                                        // Activity in den Vordergrund holen (nötig wenn per Widget gestartet)
-                                        val bringToFront = android.content.Intent(this@MainActivity, MainActivity::class.java).apply {
-                                            flags = android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                        }
-                                        startActivity(bringToFront)
                                         telecomManager?.placeCall(callUri, null)
                                     }, 4000)
                                 } else {
@@ -1298,7 +1303,9 @@ class MainActivity : ComponentActivity() {
                     
                     val result = findNativeContactWithPhone(contactName)
                     
-                    if (result != null) {
+                    if (result != null && result.first == "AMBIGUOUS") {
+                        resultString = "Mehrere Kontakte gefunden: ${result.second}. Frage die Nutzerin, welchen sie meint."
+                    } else if (result != null) {
                         val reader = com.example.voicelauncher.data.SmsReader(applicationContext)
                         val messages = reader.getSmsHistoryWithPhone(result.second, limit)
                         
@@ -1602,14 +1609,15 @@ class MainActivity : ComponentActivity() {
         
         if (matches.isEmpty()) return null
         
-        // Bei mehreren unterschiedlichen Namen mit gleichem Score: null zurückgeben (mehrdeutig)
+        // Bei mehreren unterschiedlichen Namen mit gleichem Score: Ergebnis mit AMBIGUOUS-Marker zurückgeben
         val bestScore = matches.minOf { it.third }
         val bestMatches = matches.filter { it.third == bestScore }
         val uniqueNames = bestMatches.map { it.first }.distinct()
         
         if (uniqueNames.size > 1) {
             Log.d("MainActivity", "findNativeContactWithPhone: Mehrdeutig für '$searchQuery': ${uniqueNames.joinToString(", ")}")
-            return null
+            // Statt null: speziellen Marker zurückgeben, damit der Caller die Namen anzeigen kann
+            return Pair("AMBIGUOUS", uniqueNames.joinToString(", "))
         }
         
         val best = bestMatches.first()
@@ -1738,6 +1746,21 @@ class MainActivity : ComponentActivity() {
             geminiClient.disconnect()
             audioPlayer.stopAndRelease()
             WidgetToggleService.stop(this)
+
+            // Haptisches Feedback: Einzelner kurzer Impuls = Session beendet
+            try {
+                val vibrator = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    val vm = getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
+                    vm.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                }
+                vibrator.vibrate(android.os.VibrationEffect.createOneShot(150, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Vibration fehlgeschlagen", e)
+            }
+
             Log.d("MainActivity", "Session Stopped")
         } else {
             // START
