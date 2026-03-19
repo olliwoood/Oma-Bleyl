@@ -27,6 +27,7 @@ class WidgetToggleService : Service() {
         private const val CHANNEL_ID = "widget_toggle_channel"
         private const val NOTIFICATION_ID = 9001
         private const val TAG = "WidgetToggleService"
+        const val ACTION_TOGGLE_FROM_WIDGET = "com.example.voicelauncher.ACTION_TOGGLE_FROM_WIDGET"
 
         fun start(context: Context) {
             val intent = Intent(context, WidgetToggleService::class.java)
@@ -46,13 +47,23 @@ class WidgetToggleService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
 
-        // Toggle ausführen
+        // Toggle ausführen: Callback bevorzugen, wenn Activity sichtbar ist
         val callback = VoiceLauncherWidget.onToggleAssistant
         if (callback != null) {
             callback.invoke()
         } else {
-            Log.w(TAG, "onToggleAssistant ist null – MainActivity läuft nicht, stoppe Service")
-            stopSelf()
+            // MainActivity läuft nicht oder ist im Hintergrund →
+            // Activity starten mit speziellem Action-Extra (Foreground Service darf das!)
+            Log.d(TAG, "onToggleAssistant ist null – starte MainActivity mit TOGGLE-Action")
+            val launchIntent = Intent(this, MainActivity::class.java).apply {
+                action = ACTION_TOGGLE_FROM_WIDGET
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                )
+            }
+            startActivity(launchIntent)
         }
 
         // Service bleibt laufen! Wird von MainActivity gestoppt wenn die Session endet.

@@ -170,6 +170,9 @@ class MainActivity : ComponentActivity() {
             runOnUiThread { toggleAudioSession() }
         }
 
+        // Falls Activity durch Widget-Service gestartet wurde → sofort togglen
+        handleWidgetToggleIntent(intent)
+
         setContent {
             val provider = GoogleFont.Provider(
                 providerAuthority = "com.google.android.gms.fonts",
@@ -342,6 +345,23 @@ class MainActivity : ComponentActivity() {
                 }
                 } // Ende else (kein aktiver Anruf)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleWidgetToggleIntent(intent)
+    }
+
+    private fun handleWidgetToggleIntent(intent: android.content.Intent?) {
+        if (intent?.action == WidgetToggleService.ACTION_TOGGLE_FROM_WIDGET) {
+            Log.d("MainActivity", "Widget-Toggle Intent empfangen, starte Session...")
+            // Intent-Action zurücksetzen, damit es nicht bei Config-Change nochmal triggert
+            intent.action = null
+            // Kurz verzögern, damit onCreate/setupGeminiAudio fertig ist
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                toggleAudioSession()
+            }, 300)
         }
     }
 
@@ -1722,7 +1742,23 @@ class MainActivity : ComponentActivity() {
         } else {
             // START
             isSessionActive = true
-            
+
+            // Haptisches Feedback: Doppel-Vibration damit die blinde Nutzerin spürt, dass der Assistent startet
+            try {
+                val vibrator = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    val vm = getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
+                    vm.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                }
+                // Muster: 0ms warten, 100ms vibrieren, 80ms Pause, 100ms vibrieren
+                val pattern = longArrayOf(0, 100, 80, 100)
+                vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Vibration fehlgeschlagen", e)
+            }
+
             if (geminiClient.isSetupComplete) {
                 // Eine Verbindung besteht bereits (z.B. durch Uhrzeit-Klick).
                 // Wir schalten nur das Mikrofon ein und nutzen die bestehende Session!
