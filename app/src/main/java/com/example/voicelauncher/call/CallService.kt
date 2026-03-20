@@ -31,6 +31,28 @@ class CallService : InCallService() {
             currentCall?.disconnect()
             Log.d("CallService", "Anruf beendet")
         }
+        
+        // Referenz auf die aktive InCallService-Instanz für setAudioRoute()
+        var activeInstance: CallService? = null
+            private set
+        
+        fun setSpeakerRoute(speaker: Boolean) {
+            val instance = activeInstance
+            if (instance != null) {
+                try {
+                    if (speaker) {
+                        instance.setAudioRoute(android.telecom.CallAudioState.ROUTE_SPEAKER)
+                    } else {
+                        instance.setAudioRoute(android.telecom.CallAudioState.ROUTE_EARPIECE)
+                    }
+                    Log.d("CallService", "Audio-Route gesetzt: ${if (speaker) "SPEAKER" else "EARPIECE"}")
+                } catch (e: Exception) {
+                    Log.e("CallService", "setAudioRoute fehlgeschlagen", e)
+                }
+            } else {
+                Log.w("CallService", "Keine aktive InCallService-Instanz für setAudioRoute")
+            }
+        }
     }
     
     private val callCallback = object : Call.Callback() {
@@ -45,6 +67,7 @@ class CallService : InCallService() {
         Log.d("CallService", "Call added")
         
         currentCall = call
+        activeInstance = this
         call.registerCallback(callCallback)
         
         // Full-Screen Notification statt direktem startActivity() verwenden,
@@ -103,7 +126,15 @@ class CallService : InCallService() {
                 "Eine unbekannte Nummer ruft an. Sag es ihr und frag, ob sie rangehen möchte. Hör ihr zu und reagiere auf ihre Antwort: Bei Zustimmung nutze answer_call, bei Ablehnung reject_call."
             }
             Log.d("CallService", "Starte Gemini für eingehenden Anruf")
-            CallStateHolder.onIncomingCallReady?.invoke(prompt)
+            val callback = CallStateHolder.onIncomingCallReady
+            if (callback != null) {
+                callback.invoke(prompt)
+            } else {
+                // Activity ist (noch) nicht bereit – Prompt zwischenspeichern.
+                // Die Activity holt ihn in onResume() ab.
+                Log.w("CallService", "onIncomingCallReady ist null, speichere Prompt für später")
+                CallStateHolder.pendingIncomingPrompt = prompt
+            }
         }
     }
     
@@ -203,6 +234,7 @@ class CallService : InCallService() {
             Log.d("CallService", "Zusammenfassung übersprungen – Gemini hat den Anruf ungelesen abgelehnt")
         }
         currentCall = null
+        activeInstance = null
         cancelCallNotification()
         
         CallStateHolder.callState.value = CallStateHolder.State.DISCONNECTED
@@ -250,8 +282,13 @@ class CallService : InCallService() {
         }
         nm.createNotificationChannel(channel)
         
+        // Bildschirm aufwecken (wichtig für eingehende Anrufe bei gesperrtem/ausgeschaltetem Screen)
+        wakeUpScreen()
+        
         val fullScreenIntent = android.content.Intent(this, com.example.voicelauncher.MainActivity::class.java).apply {
-            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                    android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
             putExtra("SHOW_CALL_SCREEN", true)
         }
         val fullScreenPi = PendingIntent.getActivity(
@@ -259,16 +296,60 @@ class CallService : InCallService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
+        // Passenden Text für ein-/ausgehende Anrufe
+        val isOutgoing = call.state == Call.STATE_DIALING || 
+                         call.state == Call.STATE_CONNECTING || 
+                         call.state == Call.STATE_SELECT_PHONE_ACCOUNT
+        val notifText = if (isOutgoing) "Ausgehender Anruf..." else "Eingehender Anruf..."
+        
         val notification = Notification.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_menu_call)
             .setContentTitle("Anruf")
-            .setContentText("Eingehender Anruf...")
+            .setContentText(notifText)
             .setFullScreenIntent(fullScreenPi, true)
             .setCategory(Notification.CATEGORY_CALL)
             .setOngoing(true)
             .build()
         
         nm.notify(CALL_NOTIFICATION_ID, notification)
+        
+        // Zusätzlich: Activity direkt in den Vordergrund bringen.
+        // InCallService hat eine spezielle Ausnahme von Android's BAL-Restrictions,
+        // daher darf startActivity() hier aufgerufen werden.
+        try {
+            val bringToFrontIntent = android.content.Intent(this, com.example.voicelauncher.MainActivity::class.java).apply {
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                putExtra("SHOW_CALL_SCREEN", true)
+            }
+            startActivity(bringToFrontIntent)
+            Log.d("CallService", "Activity direkt in den Vordergrund gebracht")
+        } catch (e: Exception) {
+            Log.w("CallService", "startActivity fehlgeschlagen (BAL?), Notification sollte greifen", e)
+        }
+    }
+    
+    /**
+     * Weckt den Bildschirm auf, damit die Activity sichtbar wird.
+     * Nutzt einen WakeLock mit ACQUIRE_CAUSES_WAKEUP.
+     */
+    private fun wakeUpScreen() {
+        try {
+            val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            if (!pm.isInteractive) {
+                val wakeLock = pm.newWakeLock(
+                    android.os.PowerManager.FULL_WAKE_LOCK or
+                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    android.os.PowerManager.ON_AFTER_RELEASE,
+                    "VoiceLauncher:IncomingCall"
+                )
+                wakeLock.acquire(10_000L) // 10 Sekunden, dann automatisch Release
+                Log.d("CallService", "Bildschirm aufgeweckt via WakeLock")
+            }
+        } catch (e: Exception) {
+            Log.e("CallService", "WakeLock fehlgeschlagen", e)
+        }
     }
     
     private fun cancelCallNotification() {

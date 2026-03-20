@@ -217,21 +217,11 @@ fun CallScreen() {
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = if (isSpeakerOn) "AN" else "AUS",
-                            fontSize = 22.sp,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                            color = if (isSpeakerOn) Color.White else Color(0xFF64748B),
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = "Lautsprecher",
-                            fontSize = 10.sp,
-                            color = if (isSpeakerOn) Color.White.copy(alpha = 0.8f) else Color(0xFF94A3B8),
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Text(
+                        text = if (isSpeakerOn) "🔊" else "🔇",
+                        fontSize = 40.sp,
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
         }

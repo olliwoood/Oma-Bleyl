@@ -351,7 +351,94 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+        setIntent(intent) // Neuen Intent speichern (wichtig für singleTask)
         handleWidgetToggleIntent(intent)
+        
+        // Wenn der Intent von CallService kommt: Lockscreen entfernen
+        if (intent.getBooleanExtra("SHOW_CALL_SCREEN", false)) {
+            Log.d("MainActivity", "SHOW_CALL_SCREEN Intent empfangen, bringe App in den Vordergrund")
+            dismissKeyguard()
+        }
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // Prüfe, ob ein eingehender Anruf-Prompt gespeichert wurde
+        // (z.B. wenn die Activity noch nicht bereit war als der Anruf einging)
+        val pendingPrompt = CallStateHolder.pendingIncomingPrompt
+        if (pendingPrompt != null && CallStateHolder.isInCall) {
+            CallStateHolder.pendingIncomingPrompt = null
+            Log.d("MainActivity", "Verarbeite zwischengespeicherten IncomingCall-Prompt")
+            boostAssistantVolume()
+            startSessionWithPrompt(pendingPrompt, setOf(ToolGroup.CORE, ToolGroup.COMMUNICATION))
+        }
+    }
+    
+    /**
+     * Entfernt den Lockscreen, damit die App sichtbar wird (z.B. bei eingehendem Anruf).
+     */
+    private fun dismissKeyguard() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+                val km = getSystemService(android.content.Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+                km.requestDismissKeyguard(this, null)
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "dismissKeyguard fehlgeschlagen", e)
+        }
+    }
+    
+    /**
+     * Dreht die Medienlautstärke (für Geminis Sprachausgabe) auf Maximum,
+     * damit sie neben dem Klingelton hörbar ist.
+     * Merkt sich die vorherige Lautstärke und stellt sie nach dem Anruf wieder her.
+     */
+    private var savedMediaVolume = -1
+    
+    private fun boostAssistantVolume() {
+        try {
+            val audioManager = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            savedMediaVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            
+            // Klingellautstärke als Prozentsatz auslesen und auf Medienlautstärke übertragen
+            val ringerVol = audioManager.getStreamVolume(android.media.AudioManager.STREAM_RING)
+            val ringerMax = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_RING)
+            val mediaMax = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            
+            val targetVol = if (ringerMax > 0) {
+                ((ringerVol.toFloat() / ringerMax) * mediaMax).toInt().coerceIn(1, mediaMax)
+            } else {
+                mediaMax
+            }
+            
+            audioManager.setStreamVolume(
+                android.media.AudioManager.STREAM_MUSIC,
+                targetVol,
+                0 // Keine UI-Anzeige
+            )
+            Log.d("MainActivity", "Medien-Lautstärke an Klingelton angepasst: $savedMediaVolume → $targetVol (Ringer: $ringerVol/$ringerMax, Media-Max: $mediaMax)")
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Medien-Lautstärke anpassen fehlgeschlagen", e)
+        }
+    }
+    
+    private fun restoreAssistantVolume() {
+        if (savedMediaVolume >= 0) {
+            try {
+                val audioManager = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+                audioManager.setStreamVolume(
+                    android.media.AudioManager.STREAM_MUSIC,
+                    savedMediaVolume,
+                    0
+                )
+                Log.d("MainActivity", "Medien-Lautstärke wiederhergestellt: $savedMediaVolume")
+                savedMediaVolume = -1
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Medien-Lautstärke wiederherstellen fehlgeschlagen", e)
+            }
+        }
     }
 
     private fun handleWidgetToggleIntent(intent: android.content.Intent?) {
@@ -370,6 +457,13 @@ class MainActivity : ComponentActivity() {
         // Callback für Anruf-Zusammenfassung registrieren
         CallStateHolder.onCallSummaryReady = { summaryText ->
             runOnUiThread {
+                restoreAssistantVolume()
+                // Falls die Session während des Anrufs gestorben ist (Audio-Fokus verloren),
+                // stellen wir sicher, dass eine neue Session sauber gestartet wird.
+                if (!geminiClient.isSetupComplete) {
+                    isSessionActive = false
+                    Log.d("MainActivity", "Gemini-Verbindung war weg, starte neue Session für Zusammenfassung")
+                }
                 startSessionWithPrompt(summaryText)
             }
         }
@@ -377,14 +471,15 @@ class MainActivity : ComponentActivity() {
         // Callback für eingehenden Anruf: Gemini-Session starten für Sprachsteuerung
         CallStateHolder.onIncomingCallReady = { prompt ->
             runOnUiThread {
+                // Gemini-Lautstärke hochdrehen, damit Ansage neben Klingelton hörbar ist
+                boostAssistantVolume()
                 startSessionWithPrompt(prompt, setOf(ToolGroup.CORE, ToolGroup.COMMUNICATION))
             }
         }
         
         // Callback für Lautsprecher-Toggle im Call-Screen
         CallStateHolder.onToggleSpeaker = { enabled ->
-            val audioManager = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
-            audioManager.isSpeakerphoneOn = enabled
+            CallService.setSpeakerRoute(enabled)
             Log.d("MainActivity", "Lautsprecher umgeschaltet: $enabled")
         }
         
@@ -1142,8 +1237,14 @@ class MainActivity : ComponentActivity() {
                 "answer_call" -> {
                     Log.d("MainActivity", "Tool Called: answer_call")
                     CallStateHolder.callHandledByGemini = true
-                    // Erst Gemini sagen lassen, dann nach 2 Sek den Anruf wirklich annehmen
+                    // Gemini-Session stoppen bevor der Anruf angenommen wird
+                    // (Telecom übernimmt Audio-Fokus, Session würde sonst sterben)
+                    // Nach dem Anruf wird in onCallSummaryReady eine neue Session gestartet.
                     android.os.Handler(mainLooper).postDelayed({
+                        audioRecorder.stopRecording()
+                        isSessionActive = false
+                        geminiClient.disconnect()
+                        audioPlayer.stopAndRelease()
                         CallService.answerCall()
                     }, 2000)
                     com.example.voicelauncher.data.SessionLog.addEvent(applicationContext, "Aktiven eigehenden Anruf angenommen")
@@ -1164,7 +1265,8 @@ class MainActivity : ComponentActivity() {
                     val enabled = args["enabled"]?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content?.toBooleanStrictOrNull() ?: true
                     Log.d("MainActivity", "Tool Called: toggle_speakerphone -> enabled=$enabled")
                     val audioManager = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
-                    audioManager.isSpeakerphoneOn = enabled
+                    CallService.setSpeakerRoute(enabled)
+                    audioManager.isSpeakerphoneOn = enabled // Fallback für nicht-Telecom Audio
                     CallStateHolder.isSpeakerOn.value = enabled
                     val statusText = if (enabled) "Lautsprecher eingeschaltet" else "Lautsprecher ausgeschaltet"
                     com.example.voicelauncher.data.SessionLog.addEvent(applicationContext, statusText)

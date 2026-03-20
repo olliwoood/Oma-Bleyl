@@ -35,6 +35,10 @@ object CallStateHolder {
     // Callback wenn eingehender Anruf klingelt (für Gemini-Session mit Sprachsteuerung)
     var onIncomingCallReady: ((String) -> Unit)? = null
     
+    // Fallback: Wenn der Callback null ist (Activity noch nicht bereit),
+    // wird der Prompt hier zwischengespeichert und von der Activity bei onResume abgeholt.
+    var pendingIncomingPrompt: String? = null
+    
     // Callback zum Umschalten des Lautsprechers (wird von MainActivity gesetzt)
     var onToggleSpeaker: ((Boolean) -> Unit)? = null
     
@@ -49,5 +53,6 @@ object CallStateHolder {
         callStartTimeMs.value = 0L
         isSpeakerOn.value = false
         callHandledByGemini = false
+        pendingIncomingPrompt = null
     }
 }
