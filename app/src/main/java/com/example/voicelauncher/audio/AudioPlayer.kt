@@ -19,8 +19,8 @@ class AudioPlayer {
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     private val bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat)
 
-    // Pre-buffering: Erst abspielen wenn genug Daten da sind, verhindert Underruns
-    private val PRE_BUFFER_CHUNKS = 5
+    // Pre-buffering: Mindestens 1 Chunk bevor Wiedergabe startet
+    private val PRE_BUFFER_CHUNKS = 1
 
     init {
         openAudioTrack()
@@ -35,7 +35,7 @@ class AudioPlayer {
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -46,8 +46,7 @@ class AudioPlayer {
                     .setChannelMask(channelConfig)
                     .build()
             )
-            .setBufferSizeInBytes(bufferSize * 12) // Sehr großer Buffer verhindert Underruns
-            .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            .setBufferSizeInBytes(bufferSize * 2)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
             
@@ -127,7 +126,7 @@ class AudioPlayer {
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -138,8 +137,7 @@ class AudioPlayer {
                     .setChannelMask(channelConfig)
                     .build()
             )
-            .setBufferSizeInBytes(bufferSize * 12)
-            .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            .setBufferSizeInBytes(bufferSize * 2)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 

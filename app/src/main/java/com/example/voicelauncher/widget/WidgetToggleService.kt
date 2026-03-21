@@ -1,5 +1,6 @@
 package com.example.voicelauncher.widget
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,8 +8,11 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.example.voicelauncher.MainActivity
 import com.example.voicelauncher.R
 
@@ -45,7 +49,19 @@ class WidgetToggleService : Service() {
 
         // Foreground Notification sofort anzeigen (Pflicht für startForegroundService)
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        
+        // Prüfe ob RECORD_AUDIO Berechtigung vorhanden ist
+        val hasMicPermission = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        
+        if (hasMicPermission) {
+            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } else {
+            // Ohne Mikrofon-Berechtigung: normalen Foreground Service starten (kein Crash)
+            Log.w(TAG, "RECORD_AUDIO nicht erteilt – starte ohne Microphone-Typ")
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
 
         // Toggle ausführen: Callback bevorzugen, wenn Activity sichtbar ist
         val callback = VoiceLauncherWidget.onToggleAssistant
