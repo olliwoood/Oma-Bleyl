@@ -39,7 +39,7 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
     private var lastSystemPrompt: String? = null
     private var lastToolGroups: Set<ToolGroup>? = null
     private var reconnectAttempts = 0
-    private val maxReconnectAttempts = 3
+    private val maxReconnectAttempts = 5
     
     // Aktuell geladene Tool-Gruppen für die laufende Session
     private var activeToolGroups = mutableSetOf<ToolGroup>()
@@ -62,18 +62,22 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
     
 
 
-    fun connect(systemPrompt: String, toolGroups: Set<ToolGroup> = setOf(ToolGroup.CORE)) {
+    fun connect(systemPrompt: String, toolGroups: Set<ToolGroup> = setOf(ToolGroup.CORE), isReconnect: Boolean = false) {
         // Schutz gegen Zombie-Reconnect: Wenn disconnect() schon aufgerufen wurde,
         // aber ein postDelayed-Timer noch connect() auslöst → abbrechen.
-        if (isUserDisconnect) {
-            Log.w("GeminiLiveClient", "connect() abgebrochen – disconnect() wurde bereits aufgerufen")
+        // Gilt NUR für Reconnects – frische Verbindungen sollen immer funktionieren.
+        if (isUserDisconnect && isReconnect) {
+            Log.w("GeminiLiveClient", "Reconnect abgebrochen – disconnect() wurde bereits aufgerufen")
             return
         }
+        
+        // Neuer Connect-Aufruf → Flag zurücksetzen
+        isUserDisconnect = false
         
         activeToolGroups = toolGroups.toMutableSet()
         lastSystemPrompt = systemPrompt
         lastToolGroups = toolGroups
-        reconnectAttempts = 0
+        if (!isReconnect) reconnectAttempts = 0
         
         val url = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=$apiKey"
         
@@ -126,8 +130,8 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
                         Log.w("GeminiLiveClient", "Verbindung verloren, Reconnect-Versuch $reconnectAttempts/$maxReconnectAttempts...")
                         // Kurz warten, dann neu verbinden
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            connect(prompt, groups)
-                        }, 1500L * reconnectAttempts) // Progressives Delay
+                            connect(prompt, groups, isReconnect = true)
+                        }, 3000L * reconnectAttempts) // Progressives Delay: 3s, 6s, 9s, 12s, 15s
                         return
                     }
                 }

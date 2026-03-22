@@ -84,14 +84,13 @@ class CallService : InCallService() {
             ""
         }
         
-        val lookedUpName = if (contactName.isBlank() && callerIdName.isBlank() && number != "Unbekannt") {
-            lookupContactByNumber(number)
-        } else ""
+        // Immer nachschlagen – contactDisplayName wird von Android asynchron befüllt und ist oft leer
+        val lookedUpName = if (number != "Unbekannt") lookupContactByNumber(number) else ""
         
         val displayName = when {
+            lookedUpName.isNotBlank() -> lookedUpName
             contactName.isNotBlank() -> contactName
             callerIdName.isNotBlank() -> callerIdName
-            lookedUpName.isNotBlank() -> lookedUpName
             else -> number
         }
         
@@ -237,6 +236,7 @@ class CallService : InCallService() {
         activeInstance = null
         cancelCallNotification()
         
+        CallStateHolder.callEndedAtMs = System.currentTimeMillis()
         CallStateHolder.callState.value = CallStateHolder.State.DISCONNECTED
         android.os.Handler(mainLooper).postDelayed({
             // Nur zurücksetzen, wenn kein neuer Anruf in der Zwischenzeit hereingekommen ist

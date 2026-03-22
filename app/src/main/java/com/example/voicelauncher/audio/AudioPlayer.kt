@@ -22,9 +22,8 @@ class AudioPlayer {
     // Pre-buffering: Mindestens 1 Chunk bevor Wiedergabe startet
     private val PRE_BUFFER_CHUNKS = 1
 
-    init {
-        openAudioTrack()
-    }
+    // AudioTrack wird NICHT im init erstellt.
+    // Erst beim ersten playAudio()-Aufruf → verhindert Underrun + disabled state.
 
     @Synchronized
     private fun openAudioTrack() {

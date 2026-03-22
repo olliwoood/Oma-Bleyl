@@ -464,6 +464,10 @@ class MainActivity : ComponentActivity() {
                     isSessionActive = false
                     Log.d("MainActivity", "Gemini-Verbindung war weg, starte neue Session für Zusammenfassung")
                 }
+                // Prompt als Backup speichern – falls die Verbindung beim Senden stirbt
+                // (Mobilfunk-Daten brechen bei Anrufen oft ab), wird er beim Reconnect
+                // automatisch über onSetupComplete erneut gesendet.
+                pendingClientPrompt = summaryText
                 startSessionWithPrompt(summaryText)
             }
         }
@@ -1363,21 +1367,33 @@ class MainActivity : ComponentActivity() {
                 }
                 "stop_audio_session" -> {
                     Log.d("MainActivity", "Tool Called: stop_audio_session")
-                    com.example.voicelauncher.data.SessionLog.addEvent(applicationContext, "Gespräch durch Nutzer beendet")
                     
-                    // Mikrofon sofort abschalten, Gemini hört ab jetzt nichts mehr.
-                    audioRecorder.stopRecording()
-                    
-                    // 5 Sekunden warten, damit Gemini sein "Tschüss" zu Ende sprechen kann.
-                    // Das Audio wird fertig gestreamt, danach trennen wir die Verbindung und die UI wird blau.
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        if (isSessionActive) {
-                            toggleAudioSession()
+                    // Nach einem Anruf soll die Session NICHT beendet werden,
+                    // damit die Nutzerin Folgeanweisungen geben kann.
+                    val callJustEnded = CallStateHolder.callState.value == CallStateHolder.State.DISCONNECTED
+                            || CallStateHolder.isInCall
+                    if (callJustEnded) {
+                        Log.d("MainActivity", "stop_audio_session BLOCKIERT – Anruf gerade beendet, Session bleibt offen")
+                        buildJsonObject {
+                            put("result", JsonPrimitive("NEIN, beende die Session jetzt NICHT! Der Anruf wurde gerade erst beendet. Frag die Nutzerin ob sie noch etwas braucht und WARTE auf ihre Antwort."))
                         }
-                    }, 5000)
+                    } else {
+                        com.example.voicelauncher.data.SessionLog.addEvent(applicationContext, "Gespräch durch Nutzer beendet")
                     
-                    buildJsonObject {
-                        put("result", JsonPrimitive("OK, Mikrofon aus. Verabschiede dich jetzt kurz, Leitung wird in 4 Sek getrennt."))
+                        // Mikrofon sofort abschalten, Gemini hört ab jetzt nichts mehr.
+                        audioRecorder.stopRecording()
+                    
+                        // 5 Sekunden warten, damit Gemini sein "Tschüss" zu Ende sprechen kann.
+                        // Das Audio wird fertig gestreamt, danach trennen wir die Verbindung und die UI wird blau.
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            if (isSessionActive) {
+                                toggleAudioSession()
+                            }
+                        }, 5000)
+                    
+                        buildJsonObject {
+                            put("result", JsonPrimitive("OK, Mikrofon aus. Verabschiede dich jetzt kurz, Leitung wird in 4 Sek getrennt."))
+                        }
                     }
                 }
                 "get_latest_sms" -> {
@@ -1736,7 +1752,7 @@ class MainActivity : ComponentActivity() {
 
         var systemPrompt = """Du bist ein freundlicher, geduldiger junger Mann, der einer älteren, blinden Dame im Alltag hilft. Warmherzig, locker, respektvoll. Du siezt sie ('Sie'/'Ihnen'), herzlich und natürlich. Kurze, klare Sätze – sie ist blind, lange Schachtelsätze sind schwer zu folgen. Lebendiger Tonfall, abwechslungsreich, keine Standardfloskeln. Keine Emojis, keine *Sternchen-Handlungen*. Bei Tool-Nutzung kurz und natürlich auf Deutsch erklären. NIE englische Systemmeldungen aussprechen. Die App kann KEINE SMS senden, KEINE Kontakte löschen und KEINE Telefonnummern bearbeiten. Es ist gerade $currentDate.""".trimIndent()
 
-        systemPrompt += " REGELN: 1) Nutze gesunden Menschenverstand! Bei einfachen Dingen (Wetter, Uhrzeit, Anruf) direkt handeln. Bei wichtigen Aktionen (Termine anlegen, Kontakte ändern) kurz die Details bestätigen lassen. 2) Kurz erwähnen, was du tust. 3) Nie stumm bleiben. 4) WICHTIG – AUTOMATISCH MERKEN: Wenn die Nutzerin persönliche Informationen erwähnt (Familie, Beziehungen, Vorlieben, Gewohnheiten, wichtige Fakten), SOFORT mit handle_memory speichern – OHNE nachzufragen! Beispiele: 'Jörg ist mein Sohn' → speichere 'Sohn = Jörg'. 'Ich trinke gern Kaffee' → speichere 'Trinkt gern Kaffee'. 'Meine Schwester heißt Ingrid' → speichere 'Schwester = Ingrid'. So kannst du bei 'ruf meinen Sohn an' sofort Jörg anrufen. 5) VERKNÜPFUNG: Wenn die Nutzerin nach Infos über eine Person fragt (z.B. 'Wann hat mein Sohn Geburtstag?'), nutze dein Wissen aus den Erinnerungen (z.B. Sohn = Jörg) UND schlage im Kontakt nach (manage_contacts mit action=get), um Geburtstag etc. zu finden. 6) FLEXIBLE KONTAKTSUCHE: Kontakte können unter verschiedenen Namen gespeichert sein! Wenn du jemanden nicht findest, probiere Varianten: Mutter→Mama/Mutti, Vater→Papa/Papi, Schwester→Vorname, etc. Nutze im Zweifel get_contact_list, um alle Kontakte zu sehen und den richtigen zu finden. manage_contacts ist NUR für Name und Geburtstag. 7) SESSION BEENDEN: Wenn die Aufgabe erledigt ist und die Nutzerin nichts weiteres braucht, verabschiede dich herzlich und rufe stop_audio_session auf. Wenn du fragst ob noch etwas ist, warte auf die Antwort bevor du beendest."
+        systemPrompt += " REGELN: 1) Nutze gesunden Menschenverstand! Bei einfachen Dingen (Wetter, Uhrzeit) direkt handeln. Bei wichtigen Aktionen (Termine anlegen, Kontakte ändern) kurz die Details bestätigen lassen. 2) Kurz erwähnen, was du tust. 3) Nie stumm bleiben. 4) WICHTIG – AUTOMATISCH MERKEN: Wenn die Nutzerin persönliche Informationen erwähnt (Familie, Beziehungen, Vorlieben, Gewohnheiten, wichtige Fakten), SOFORT mit handle_memory speichern – OHNE nachzufragen! Beispiele: 'Jörg ist mein Sohn' → speichere 'Sohn = Jörg'. 'Ich trinke gern Kaffee' → speichere 'Trinkt gern Kaffee'. 'Meine Schwester heißt Ingrid' → speichere 'Schwester = Ingrid'. So kannst du bei 'ruf meinen Sohn an' sofort Jörg anrufen. 5) VERKNÜPFUNG: Wenn die Nutzerin nach Infos über eine Person fragt (z.B. 'Wann hat mein Sohn Geburtstag?'), nutze dein Wissen aus den Erinnerungen (z.B. Sohn = Jörg) UND schlage im Kontakt nach (manage_contacts mit action=get), um Geburtstag etc. zu finden. 6) FLEXIBLE KONTAKTSUCHE: Kontakte können unter verschiedenen Namen gespeichert sein! Wenn du jemanden nicht findest, probiere Varianten: Mutter→Mama/Mutti, Vater→Papa/Papi, Schwester→Vorname, etc. Nutze im Zweifel get_contact_list, um alle Kontakte zu sehen und den richtigen zu finden. manage_contacts ist NUR für Name und Geburtstag. 7) SESSION BEENDEN: Wenn die Aufgabe erledigt ist und die Nutzerin nichts weiteres braucht, verabschiede dich herzlich und rufe stop_audio_session auf. Wenn du fragst ob noch etwas ist, warte auf die Antwort bevor du beendest. 8) ANRUFE: Bevor du jemanden anrufst, frage IMMER freundlich nach, ob du den Namen richtig verstanden hast (z.B. 'Soll ich [Name] für Sie anrufen?') und warte auf Bestätigung oder Korrektur. Erst danach make_phone_call nutzen."
 
         // Kontext direkt einbauen (kein Tool-Call nötig!)
         try {
@@ -1908,6 +1924,7 @@ class MainActivity : ComponentActivity() {
         if (isSessionActive || geminiClient.isSetupComplete) {
             isSessionActive = true // Sicherstellen, dass die UI den aktiven Status anzeigt
             geminiClient.sendClientContent(prompt)
+            pendingClientPrompt = null // Erfolgreich gesendet → Backup löschen
             // Sicherstellen, dass das Mikro läuft (könnte durch Anruf gestoppt worden sein)
             audioRecorder.startRecording { audioChunk ->
                 geminiClient.sendAudio(audioChunk)

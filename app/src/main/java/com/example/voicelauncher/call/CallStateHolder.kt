@@ -25,6 +25,9 @@ object CallStateHolder {
     // Freisprechfunktion an/aus
     var isSpeakerOn = mutableStateOf(false)
     
+    // Zeitstempel wann der letzte Anruf endete (für Post-Call-Schutz)
+    var callEndedAtMs: Long = 0L
+    
     // Flag: Wurde der Anruf bereits von Gemini bearbeitet (angenommen/abgelehnt)?
     // Wenn ja, wird keine erneute Zusammenfassung gesendet.
     var callHandledByGemini = false
@@ -52,6 +55,7 @@ object CallStateHolder {
         isIncoming.value = false
         callStartTimeMs.value = 0L
         isSpeakerOn.value = false
+        // callEndedAtMs wird NICHT zurückgesetzt, damit der Post-Call-Guard funktioniert
         callHandledByGemini = false
         pendingIncomingPrompt = null
     }

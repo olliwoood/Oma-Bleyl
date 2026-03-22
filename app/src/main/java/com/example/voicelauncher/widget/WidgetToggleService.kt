@@ -56,7 +56,18 @@ class WidgetToggleService : Service() {
         ) == PackageManager.PERMISSION_GRANTED
         
         if (hasMicPermission) {
-            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Microphone FGS fehlgeschlagen (App nicht im eligible state), Fallback...", e)
+                try {
+                    startForeground(NOTIFICATION_ID, buildNotification())
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Auch generischer FGS fehlgeschlagen", e2)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+            }
         } else {
             // Ohne Mikrofon-Berechtigung: normalen Foreground Service starten (kein Crash)
             Log.w(TAG, "RECORD_AUDIO nicht erteilt – starte ohne Microphone-Typ")
