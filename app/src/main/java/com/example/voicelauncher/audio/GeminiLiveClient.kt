@@ -287,14 +287,7 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
                         put("required", buildJsonArray { add("query") })
                     })
                 })
-                add(buildJsonObject {
-                    put("name", "answer_call")
-                    put("description", "NUR für EINGEHENDE Anrufe die gerade klingeln! Nimmt eingehenden Anruf an.")
-                })
-                add(buildJsonObject {
-                    put("name", "reject_call")
-                    put("description", "NUR für EINGEHENDE Anrufe die gerade klingeln! Lehnt eingehenden Anruf ab.")
-                })
+
                 add(buildJsonObject {
                     put("name", "toggle_speakerphone")
                     put("description", "Freisprechfunktion (Lautsprecher) ein-/ausschalten während eines Anrufs.")

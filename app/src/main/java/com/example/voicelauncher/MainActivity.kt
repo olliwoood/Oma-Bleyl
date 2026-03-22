@@ -408,7 +408,8 @@ class MainActivity : ComponentActivity() {
             val mediaMax = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
             
             val targetVol = if (ringerMax > 0) {
-                ((ringerVol.toFloat() / ringerMax) * mediaMax).toInt().coerceIn(1, mediaMax)
+                // 30% lauter als der Klingelton, damit Gemini trotz Klingeln hörbar ist
+                ((ringerVol.toFloat() / ringerMax) * mediaMax * 1.3f).toInt().coerceIn(1, mediaMax)
             } else {
                 mediaMax
             }
@@ -1930,6 +1931,8 @@ class MainActivity : ComponentActivity() {
                 geminiClient.sendAudio(audioChunk)
             }
             Log.d("MainActivity", "Reusing existing session for prompt: $prompt")
+            VoiceLauncherWidget.updateWidget(this, true)
+            WidgetToggleService.startKeepAlive(this)
             return
         }
         
@@ -1937,6 +1940,8 @@ class MainActivity : ComponentActivity() {
         isSessionActive = true
 
         geminiClient.connect(buildSystemPrompt(), toolGroups)
+        VoiceLauncherWidget.updateWidget(this, true)
+        WidgetToggleService.startKeepAlive(this)
         Log.d("MainActivity", "Session Started Automatically with Prompt (${toolGroups.size} groups)")
     }
 

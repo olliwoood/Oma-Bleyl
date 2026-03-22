@@ -120,9 +120,9 @@ class CallService : InCallService() {
             val isKnown = finalName != number && finalName != "Unbekannt"
             
             val prompt = if (isKnown) {
-                "$finalName ruft gerade an! Sag es ihr und frag, ob sie rangehen möchte. Hör ihr zu und reagiere auf ihre Antwort: Bei Zustimmung nutze answer_call, bei Ablehnung reject_call."
+                "Sage genau: '$finalName ruft an!'. Wiederhole das noch 2 mal mit kurzer Pause dazwischen. Sage NICHTS anderes, kein Kommentar, keine Einleitung."
             } else {
-                "Eine unbekannte Nummer ruft an. Sag es ihr und frag, ob sie rangehen möchte. Hör ihr zu und reagiere auf ihre Antwort: Bei Zustimmung nutze answer_call, bei Ablehnung reject_call."
+                "Sage genau: 'Unbekannte Nummer ruft an!'. Wiederhole das noch 2 mal mit kurzer Pause dazwischen. Sage NICHTS anderes, kein Kommentar, keine Einleitung."
             }
             Log.d("CallService", "Starte Gemini für eingehenden Anruf")
             val callback = CallStateHolder.onIncomingCallReady

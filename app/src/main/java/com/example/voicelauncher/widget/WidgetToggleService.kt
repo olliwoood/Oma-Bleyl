@@ -32,9 +32,18 @@ class WidgetToggleService : Service() {
         private const val NOTIFICATION_ID = 9001
         private const val TAG = "WidgetToggleService"
         const val ACTION_TOGGLE_FROM_WIDGET = "com.example.voicelauncher.ACTION_TOGGLE_FROM_WIDGET"
+        private const val ACTION_KEEP_ALIVE = "com.example.voicelauncher.ACTION_KEEP_ALIVE"
 
         fun start(context: Context) {
             val intent = Intent(context, WidgetToggleService::class.java)
+            context.startForegroundService(intent)
+        }
+
+        /** Startet den Foreground Service OHNE Toggle – nur um die App im Hintergrund am Leben zu halten. */
+        fun startKeepAlive(context: Context) {
+            val intent = Intent(context, WidgetToggleService::class.java).apply {
+                action = ACTION_KEEP_ALIVE
+            }
             context.startForegroundService(intent)
         }
 
@@ -72,6 +81,12 @@ class WidgetToggleService : Service() {
             // Ohne Mikrofon-Berechtigung: normalen Foreground Service starten (kein Crash)
             Log.w(TAG, "RECORD_AUDIO nicht erteilt – starte ohne Microphone-Typ")
             startForeground(NOTIFICATION_ID, buildNotification())
+        }
+
+        // Bei KEEP_ALIVE: Nur Foreground halten, NICHT toggeln
+        if (intent?.action == ACTION_KEEP_ALIVE) {
+            Log.d(TAG, "Keep-alive Modus – kein Toggle, nur Foreground Service")
+            return START_NOT_STICKY
         }
 
         // Toggle ausführen: Callback bevorzugen, wenn Activity sichtbar ist
