@@ -19,8 +19,9 @@ class AudioPlayer {
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     private val bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat)
 
-    // Pre-buffering: Mindestens 1 Chunk bevor Wiedergabe startet
-    private val PRE_BUFFER_CHUNKS = 1
+    // Pre-buffering: Sammle 3 Chunks bevor Wiedergabe startet.
+    // Glättet Netzwerk-Jitter und verhindert Stotterer mitten im Satz.
+    private val PRE_BUFFER_CHUNKS = 3
 
     // AudioTrack wird NICHT im init erstellt.
     // Erst beim ersten playAudio()-Aufruf → verhindert Underrun + disabled state.
@@ -45,7 +46,7 @@ class AudioPlayer {
                     .setChannelMask(channelConfig)
                     .build()
             )
-            .setBufferSizeInBytes(bufferSize * 2)
+            .setBufferSizeInBytes(bufferSize * 4)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
             
@@ -111,6 +112,12 @@ class AudioPlayer {
 
     @Synchronized
     private fun recreateAudioTrack() {
+        // Abbruch wenn stopAndRelease() bereits aufgerufen wurde
+        if (!isPlaying) {
+            audioTrack = null
+            return
+        }
+
         try {
             audioTrack?.apply {
                 if (playState == AudioTrack.PLAYSTATE_PLAYING) {
@@ -121,7 +128,7 @@ class AudioPlayer {
         } catch (e: Exception) {
            Log.e("AudioPlayer", "Error releasing old AudioTrack in recreate", e)
         }
-        
+
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -136,7 +143,7 @@ class AudioPlayer {
                     .setChannelMask(channelConfig)
                     .build()
             )
-            .setBufferSizeInBytes(bufferSize * 2)
+            .setBufferSizeInBytes(bufferSize * 4)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
@@ -160,6 +167,8 @@ class AudioPlayer {
         playThread = null
         audioQueue.clear()
     }
+
+    fun hasBufferedAudio(): Boolean = audioQueue.isNotEmpty()
 
     fun playAudio(pcmData: ByteArray) {
         if (audioTrack == null || audioTrack?.state == AudioTrack.STATE_UNINITIALIZED) {

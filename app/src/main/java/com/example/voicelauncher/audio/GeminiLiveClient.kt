@@ -43,10 +43,19 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
     
     // Aktuell geladene Tool-Gruppen für die laufende Session
     private var activeToolGroups = mutableSetOf<ToolGroup>()
+
+    // Setup-Timeout: Wenn Server nach 10s kein setupComplete sendet → aufräumen
+    private val setupTimeoutHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val setupTimeoutMs = 10000L
     
     // Verhindert Audio-Senden während Gemini spricht (sonst interrupted-Kaskade)
     @Volatile var isGeminiSpeaking = false
         private set
+
+    // Grace-Period: Nach turnComplete braucht der AudioPlayer noch kurz zum Abspielen
+    // des gepufferten Audios. In dieser Zeit bleibt das Mikro blockiert.
+    private var speakingEndedAtMs = 0L
+    private val postSpeechGraceMs = 1000L
     
     // Callback für einkommende PCM-Audiodaten von Gemini
     var onAudioReceived: ((ByteArray) -> Unit)? = null
@@ -59,6 +68,9 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
     
     // Callback wenn die Verbindung getrennt wird
     var onDisconnected: (() -> Unit)? = null
+
+    // Callback: Prüft ob AudioPlayer noch gepuffertes Audio abspielt
+    var isAudioPlaybackActive: (() -> Boolean)? = null
     
 
 
@@ -74,6 +86,16 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
         // Neuer Connect-Aufruf → Flag zurücksetzen
         isUserDisconnect = false
         
+        // Setup-Timeout starten (alten Timer abbrechen)
+        setupTimeoutHandler.removeCallbacksAndMessages(null)
+        setupTimeoutHandler.postDelayed({
+            if (!isSetupComplete && !isUserDisconnect) {
+                Log.e("GeminiLiveClient", "Setup-Timeout nach ${setupTimeoutMs}ms – Verbindung wird beendet")
+                disconnect()
+                onDisconnected?.invoke()
+            }
+        }, setupTimeoutMs)
+
         activeToolGroups = toolGroups.toMutableSet()
         lastSystemPrompt = systemPrompt
         lastToolGroups = toolGroups
@@ -484,6 +506,10 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
         
         // Kein Audio senden während Gemini spricht → verhindert interrupted-Kaskade
         if (isGeminiSpeaking) return
+        // Grace-Period: AudioPlayer spielt noch gepuffertes Audio ab
+        if (System.currentTimeMillis() - speakingEndedAtMs < postSpeechGraceMs) return
+        // Warten bis AudioPlayer-Queue leer ist (sonst hört Gemini sich selbst vom Lautsprecher)
+        if (isAudioPlaybackActive?.invoke() == true) return
         
         val base64Audio = Base64.encodeToString(pcmData, Base64.NO_WRAP)
 
@@ -532,6 +558,7 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
             
             if (jsonResponse.containsKey("setupComplete")) {
                 isSetupComplete = true
+                setupTimeoutHandler.removeCallbacksAndMessages(null)
                 Log.d("GeminiLiveClient", "Setup confirmed by server. Audio stream can start.")
                 onSetupComplete?.invoke()
                 return
@@ -572,13 +599,15 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
                 // turnComplete oder generationComplete → Gemini hat aufgehört zu sprechen
                 if (serverContent.containsKey("turnComplete") || serverContent.containsKey("generationComplete")) {
                     isGeminiSpeaking = false
+                    speakingEndedAtMs = System.currentTimeMillis()
                 }
             }
             
             // Top-Level ToolCall abfangen (Gemini sendet diese SEPARAT, nicht in serverContent!)
             jsonResponse["toolCall"]?.jsonObject?.let { toolCall ->
-                // Tool Call = Gemini hat aufgehört zu sprechen
-                isGeminiSpeaking = false
+                // NICHT isGeminiSpeaking = false setzen!
+                // Gemini spricht nach dem Tool-Response weiter.
+                // Erst turnComplete/generationComplete beendet den Turn.
                 toolCall["functionCalls"]?.jsonArray?.forEach { fc ->
                     val call = fc.jsonObject
                     val name = call["name"]?.jsonPrimitive?.content
@@ -622,6 +651,7 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
     fun disconnect() {
         isUserDisconnect = true
         reconnectAttempts = maxReconnectAttempts // Verhindert Auto-Reconnect
+        setupTimeoutHandler.removeCallbacksAndMessages(null)
         lastSystemPrompt = null
         lastToolGroups = null
         webSocket?.close(1000, "User disconnected")

@@ -70,6 +70,10 @@ class CallService : InCallService() {
         activeInstance = this
         call.registerCallback(callCallback)
         
+        // Lautsprecher sofort aktivieren (Standard für blinde Nutzerin)
+        CallStateHolder.isSpeakerOn.value = true
+        setSpeakerRoute(true)
+        
         // Full-Screen Notification statt direktem startActivity() verwenden,
         // da Android 14+ Background Activity Launches blockiert.
         showCallNotification(call)
@@ -263,6 +267,8 @@ class CallService : InCallService() {
             Call.STATE_DIALING, Call.STATE_CONNECTING -> CallStateHolder.State.DIALING
             Call.STATE_ACTIVE -> {
                 CallStateHolder.callStartTimeMs.value = System.currentTimeMillis()
+                // Lautsprecher erneut aktivieren, falls setAudioRoute vor Verbindung ignoriert wurde
+                setSpeakerRoute(true)
                 CallStateHolder.State.ACTIVE
             }
             Call.STATE_DISCONNECTED -> CallStateHolder.State.DISCONNECTED

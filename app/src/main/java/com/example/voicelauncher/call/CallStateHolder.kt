@@ -22,8 +22,8 @@ object CallStateHolder {
     var isIncoming = mutableStateOf(false)
     var callStartTimeMs = mutableStateOf(0L)
     
-    // Freisprechfunktion an/aus
-    var isSpeakerOn = mutableStateOf(false)
+    // Freisprechfunktion – immer an (Standardmäßig Lautsprecher)
+    var isSpeakerOn = mutableStateOf(true)
     
     // Zeitstempel wann der letzte Anruf endete (für Post-Call-Schutz)
     var callEndedAtMs: Long = 0L
@@ -54,7 +54,7 @@ object CallStateHolder {
         callerNumber.value = ""
         isIncoming.value = false
         callStartTimeMs.value = 0L
-        isSpeakerOn.value = false
+        isSpeakerOn.value = true  // Bleibt immer an
         // callEndedAtMs wird NICHT zurückgesetzt, damit der Post-Call-Guard funktioniert
         callHandledByGemini = false
         pendingIncomingPrompt = null

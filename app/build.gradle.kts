@@ -18,6 +18,15 @@ android {
     namespace = "com.example.voicelauncher"
     compileSdk = 34
 
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file("release-keystore.jks")
+            storePassword = "omableyl2024"
+            keyAlias = "oma-bleyl"
+            keyPassword = "omableyl2024"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.example.voicelauncher"
         minSdk = 26
@@ -32,6 +41,7 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

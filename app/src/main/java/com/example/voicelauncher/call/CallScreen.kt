@@ -8,20 +8,20 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -54,7 +54,7 @@ fun CallScreen() {
     val state = CallStateHolder.callState.value
     val callerName = CallStateHolder.callerName.value
     val callerNumber = CallStateHolder.callerNumber.value
-    val isSpeakerOn = CallStateHolder.isSpeakerOn.value
+
     val haptic = LocalHapticFeedback.current
     
     // Anrufdauer Timer
@@ -101,8 +101,8 @@ fun CallScreen() {
     // Accessibility-Text
     val accessibilityText = when (state) {
         CallStateHolder.State.RINGING -> "Eingehender Anruf von $displayName. Tippen zum Annehmen. Lange drücken zum Ablehnen."
-        CallStateHolder.State.DIALING -> "Anruf an $displayName wird aufgebaut. Tippen zum Auflegen."
-        CallStateHolder.State.ACTIVE -> "Aktives Gespräch mit $displayName. Tippen zum Auflegen."
+        CallStateHolder.State.DIALING -> "Anruf an $displayName wird aufgebaut. Lange drücken zum Auflegen."
+        CallStateHolder.State.ACTIVE -> "Aktives Gespräch mit $displayName. Lange drücken zum Auflegen."
         CallStateHolder.State.DISCONNECTED -> "Anruf beendet."
         else -> ""
     }
@@ -123,7 +123,7 @@ fun CallScreen() {
     
     val subText = when (state) {
         CallStateHolder.State.RINGING -> "Tippen zum Annehmen\nLange drücken zum Ablehnen"
-        CallStateHolder.State.DIALING, CallStateHolder.State.ACTIVE -> "Tippen zum Auflegen"
+        CallStateHolder.State.DIALING, CallStateHolder.State.ACTIVE -> "Lange drücken zum Auflegen"
         else -> ""
     }
     
@@ -140,15 +140,20 @@ fun CallScreen() {
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     when (state) {
+                        // Tippen: Annehmen bei eingehendem Anruf
                         CallStateHolder.State.RINGING -> CallService.answerCall()
-                        CallStateHolder.State.DIALING, CallStateHolder.State.ACTIVE -> CallService.hangupCall()
+                        // Tippen bei aktivem Anruf: Nichts tun (versehentliches Auflegen verhindern)
                         else -> {}
                     }
                 },
                 onLongClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    if (state == CallStateHolder.State.RINGING) {
-                        CallService.hangupCall()
+                    when (state) {
+                        // Lange drücken: Ablehnen bei eingehendem Anruf
+                        CallStateHolder.State.RINGING -> CallService.hangupCall()
+                        // Lange drücken: Auflegen bei aktivem/wählendem Anruf
+                        CallStateHolder.State.DIALING, CallStateHolder.State.ACTIVE -> CallService.hangupCall()
+                        else -> {}
                     }
                 }
             ),
@@ -195,35 +200,7 @@ fun CallScreen() {
                 }
             }
             
-            // Lautsprecher-Button unten – nur bei aktivem oder klingelndem Anruf
-            if (state == CallStateHolder.State.ACTIVE || state == CallStateHolder.State.RINGING || state == CallStateHolder.State.DIALING) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 48.dp)
-                        .size(100.dp)
-                        .background(
-                            color = if (isSpeakerOn) Color(0xFF22C55E) else Color(0xFFE2E8F0),
-                            shape = CircleShape
-                        )
-                        .clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            val newState = !isSpeakerOn
-                            CallStateHolder.isSpeakerOn.value = newState
-                            CallStateHolder.onToggleSpeaker?.invoke(newState)
-                        }
-                        .semantics {
-                            contentDescription = if (isSpeakerOn) "Lautsprecher ist an. Tippen zum Ausschalten." else "Lautsprecher ist aus. Tippen zum Einschalten."
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isSpeakerOn) "🔊" else "🔇",
-                        fontSize = 40.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
+            // Lautsprecher-Button entfernt – Lautsprecher ist immer an (für blinde Nutzerin)
         }
     }
 }

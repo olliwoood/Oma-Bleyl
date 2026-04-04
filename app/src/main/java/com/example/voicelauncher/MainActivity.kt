@@ -57,6 +57,7 @@ import com.example.voicelauncher.audio.AudioPlayer
 import com.example.voicelauncher.audio.AudioRecorder
 import com.example.voicelauncher.audio.GeminiLiveClient
 import com.example.voicelauncher.audio.ToolGroup
+import java.util.concurrent.atomic.AtomicReference
 import com.example.voicelauncher.call.CallLogScreen
 import com.example.voicelauncher.call.CallScreen
 import com.example.voicelauncher.call.CallStateHolder
@@ -106,8 +107,11 @@ class MainActivity : ComponentActivity() {
     private val geminiClient by lazy { GeminiLiveClient(BuildConfig.GEMINI_API_KEY, this) }
     
     private var isSessionActive by mutableStateOf(false)
-    private var pendingClientPrompt: String? = null
+    private val pendingClientPrompt = AtomicReference<String?>(null)
     private var lastCallStartedMs = 0L
+
+    // Proximity WakeLock: Bildschirm aus wenn Telefon am Ohr, Lautsprecher bleibt an
+    private var proximityWakeLock: android.os.PowerManager.WakeLock? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -550,7 +554,7 @@ class MainActivity : ComponentActivity() {
                 // Prompt als Backup speichern – falls die Verbindung beim Senden stirbt
                 // (Mobilfunk-Daten brechen bei Anrufen oft ab), wird er beim Reconnect
                 // automatisch über onSetupComplete erneut gesendet.
-                pendingClientPrompt = summaryText
+                pendingClientPrompt.set(summaryText)
                 startSessionWithPrompt(summaryText)
             }
         }
@@ -603,6 +607,9 @@ class MainActivity : ComponentActivity() {
             audioPlayer.playAudio(pcmData)
         }
 
+        // Mikro erst freigeben wenn AudioPlayer-Queue leer ist
+        geminiClient.isAudioPlaybackActive = { audioPlayer.hasBufferedAudio() }
+
         geminiClient.onSetupComplete = {
             // Wenn wir eine Session _mit_ Mikro wollen, starten wir die Aufnahme
             if (isSessionActive) {
@@ -612,25 +619,23 @@ class MainActivity : ComponentActivity() {
             }
             
             // Falls wir einen offenen Prompt haben (z.B. vom beendeten Anruf oder Uhrzeit-Klick), jetzt schicken
-            pendingClientPrompt?.let { prompt ->
+            // getAndSet(null) liest und löscht atomar → kein doppeltes Senden
+            pendingClientPrompt.getAndSet(null)?.let { prompt ->
                 geminiClient.sendClientContent(prompt)
-                pendingClientPrompt = null
             }
         }
 
         geminiClient.onDisconnected = {
-            // Verbindung verloren: Mikro stoppen und UI zurücksetzen
-            // Nur zurücksetzen, wenn nicht gerade eine neue Session gestartet wird
-            Log.d("MainActivity", "Verbindung zu Gemini getrennt! pendingClientPrompt=$pendingClientPrompt")
-            if (pendingClientPrompt == null) {
-                audioRecorder.stopRecording()
-                runOnUiThread {
-                    isSessionActive = false
-                    VoiceLauncherWidget.updateWidget(this@MainActivity, false)
-                    WidgetToggleService.stop(this@MainActivity)
-                }
-            } else {
-                Log.d("MainActivity", "Disconnect ignoriert – neue Session wird gerade aufgebaut.")
+            // Verbindung verloren: Immer aufräumen.
+            // Falls ein Auto-Reconnect in GeminiLiveClient läuft, wird onDisconnected
+            // erst aufgerufen wenn ALLE Versuche gescheitert sind.
+            Log.d("MainActivity", "Verbindung zu Gemini getrennt! pendingClientPrompt=${pendingClientPrompt.get()}")
+            audioRecorder.stopRecording()
+            pendingClientPrompt.set(null)
+            runOnUiThread {
+                isSessionActive = false
+                VoiceLauncherWidget.updateWidget(this@MainActivity, false)
+                WidgetToggleService.stop(this@MainActivity)
             }
         }
         
@@ -1946,6 +1951,7 @@ class MainActivity : ComponentActivity() {
             audioRecorder.stopRecording()
             geminiClient.disconnect()
             audioPlayer.stopAndRelease()
+            releaseProximityWakeLock()
             WidgetToggleService.stop(this)
 
             // Haptisches Feedback: Einzelner kurzer Impuls = Session beendet
@@ -1966,6 +1972,7 @@ class MainActivity : ComponentActivity() {
         } else {
             // START
             isSessionActive = true
+            acquireProximityWakeLock()
 
             // Haptisches Feedback: Doppel-Vibration damit die blinde Nutzerin spürt, dass der Assistent startet
             try {
@@ -2007,7 +2014,7 @@ class MainActivity : ComponentActivity() {
         if (isSessionActive || geminiClient.isSetupComplete) {
             isSessionActive = true // Sicherstellen, dass die UI den aktiven Status anzeigt
             geminiClient.sendClientContent(prompt)
-            pendingClientPrompt = null // Erfolgreich gesendet → Backup löschen
+            pendingClientPrompt.set(null) // Erfolgreich gesendet → Backup löschen
             // Sicherstellen, dass das Mikro läuft (könnte durch Anruf gestoppt worden sein)
             audioRecorder.startRecording { audioChunk ->
                 geminiClient.sendAudio(audioChunk)
@@ -2018,7 +2025,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         
-        pendingClientPrompt = prompt
+        pendingClientPrompt.set(prompt)
         isSessionActive = true
 
         geminiClient.connect(buildSystemPrompt(), toolGroups)
@@ -2033,7 +2040,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         
-        pendingClientPrompt = prompt
+        pendingClientPrompt.set(prompt)
         // Wir setzen isSessionActive absichtlich NICHT auf true, um das UI nicht zu verändern
         // und das Mikrofon nicht zu starten!
 
@@ -2041,8 +2048,37 @@ class MainActivity : ComponentActivity() {
         Log.d("MainActivity", "Session Started Without Mic (${toolGroups.size} groups)")  
     }
 
+    @Suppress("DEPRECATION")
+    private fun acquireProximityWakeLock() {
+        if (proximityWakeLock?.isHeld == true) return
+        try {
+            val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            proximityWakeLock = pm.newWakeLock(
+                android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+                "voicelauncher:proximity"
+            )
+            proximityWakeLock?.acquire()
+            Log.d("MainActivity", "Proximity WakeLock aktiviert")
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Proximity WakeLock fehlgeschlagen", e)
+        }
+    }
+
+    private fun releaseProximityWakeLock() {
+        try {
+            if (proximityWakeLock?.isHeld == true) {
+                proximityWakeLock?.release()
+                Log.d("MainActivity", "Proximity WakeLock freigegeben")
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Proximity WakeLock release fehlgeschlagen", e)
+        }
+        proximityWakeLock = null
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        releaseProximityWakeLock()
         audioRecorder.stopRecording()
         audioPlayer.stopAndRelease()
         geminiClient.disconnect()

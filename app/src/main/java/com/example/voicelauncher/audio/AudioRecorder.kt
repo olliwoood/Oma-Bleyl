@@ -24,7 +24,8 @@ class AudioRecorder {
 
     @SuppressLint("MissingPermission")
     fun startRecording(onAudioData: (ByteArray) -> Unit) {
-        if (isRecording.get()) return
+        // Atomar: Nur ein Thread kann die Aufnahme starten
+        if (!isRecording.compareAndSet(false, true)) return
 
         try {
             audioRecord = AudioRecord(
@@ -46,7 +47,7 @@ class AudioRecorder {
                     bufferSize
                 )
             }
-            
+
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                 Log.w("AudioRecorder", "MIC failed, falling back to DEFAULT")
                 audioRecord?.release()
@@ -61,21 +62,22 @@ class AudioRecorder {
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                 Log.e("AudioRecorder", "Failed to initialize AudioRecord entirely")
+                isRecording.set(false)
                 return
             }
-            
+
             // Echo-Unterdrückung aktivieren (verhindert, dass Gemini sich selbst hört)
             val sessionId = audioRecord!!.audioSessionId
             attachEchoCanceler(sessionId)
             attachNoiseSuppressor(sessionId)
-            
+
         } catch (e: Exception) {
             Log.e("AudioRecorder", "Exception initializing AudioRecord", e)
+            isRecording.set(false)
             return
         }
 
         audioRecord?.startRecording()
-        isRecording.set(true)
 
         recordThread = Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
