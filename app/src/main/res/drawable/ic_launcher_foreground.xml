@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Phone handset icon centered in adaptive icon safe zone -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38.4,49.2C42.2,56.6 48.4,62.8 55.8,66.6L61.6,60.8C62.4,60 63.4,59.8 64.4,60.2C67.6,61.2 71,61.8 74.6,61.8C76.0,61.8 77.2,63 77.2,64.4L77.2,74.6C77.2,76 76.0,77.2 74.6,77.2C49.6,77.2 29.4,57 29.4,32C29.4,30.6 30.6,29.4 32,29.4L42.4,29.4C43.8,29.4 45,30.6 45,32C45,35.6 45.6,39 46.6,42.2C46.8,43.2 46.6,44.2 45.8,45L40.0,50.8"/>
+
+</vector>

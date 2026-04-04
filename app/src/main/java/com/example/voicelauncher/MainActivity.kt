@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.googlefonts.Font
@@ -56,6 +57,7 @@ import com.example.voicelauncher.audio.AudioPlayer
 import com.example.voicelauncher.audio.AudioRecorder
 import com.example.voicelauncher.audio.GeminiLiveClient
 import com.example.voicelauncher.audio.ToolGroup
+import com.example.voicelauncher.call.CallLogScreen
 import com.example.voicelauncher.call.CallScreen
 import com.example.voicelauncher.call.CallStateHolder
 import com.example.voicelauncher.alarm.AlarmReceiver
@@ -70,6 +72,13 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
 
@@ -148,7 +157,8 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ANSWER_PHONE_CALLS,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.READ_SMS
+            Manifest.permission.READ_SMS,
+            Manifest.permission.READ_CALL_LOG
         )
 
         val allPermissionsGranted = requiredPermissions.all {
@@ -214,137 +224,209 @@ class MainActivity : ComponentActivity() {
                     AlarmScreen()
                 } else {
 
-                // --- ActionState für temporäre Icons ---
-                val currentIcon = ActionStateHolder.currentIcon.value
-                
-                // Always Bright White for background so visually impaired users see the screen is on
-                val bgColor = Color(0xFFFAFAFA)
+                // Tab-State: 0 = Telefon, 1 = Assistent
+                var selectedTab by remember { mutableIntStateOf(1) }
 
-                
-                val circleColor by animateColorAsState(
-                    targetValue = if (isSessionActive) Color(0xFF4CAF50) else Color(0xFF3B82F6),
-                    animationSpec = tween(500),
-                    label = "circleColorAnim"
-                )
-                
-                val haptic = LocalHapticFeedback.current
-                val interactionSource = remember { MutableInteractionSource() }
-                
-                Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .semantics { 
-                            contentDescription = if (isSessionActive) "Mikrofon ist an. Tippen, um Zuhören zu beenden." else "Mikrofon ist aus. Tippen, um mit dem Assistenten zu sprechen."
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Tab Content
+                    Box(modifier = Modifier.weight(1f)) {
+                        when (selectedTab) {
+                            0 -> CallLogScreen()
+                            1 -> VoiceAssistantTab()
                         }
-                        .clickable(
-                            interactionSource = interactionSource,
-                            indication = null
-                        ) {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            toggleAudioSession()
-                        },
-                    color = bgColor
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxSize()
+                    }
+
+                    // Bottom Navigation Bar - seniorengerecht (gross, klar)
+                    NavigationBar(
+                        containerColor = Color(0xFFF1F5F9),
+                        tonalElevation = 8.dp,
+                        modifier = Modifier.height(80.dp)
                     ) {
-                        // Oberes Drittel für Text/Uhr
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .padding(top = 48.dp, start = 24.dp, end = 24.dp),
-                            contentAlignment = Alignment.TopCenter
-                        ) {
-                            var currentTime by remember { mutableStateOf(LocalTime.now()) }
-                            var lastTimeSpoken by remember { mutableLongStateOf(0L) }
-                            val formatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
-
-                            LaunchedEffect(Unit) {
-                                while (true) {
-                                    currentTime = LocalTime.now()
-                                    delay(1000)
-                                }
-                            }
-
-                            Surface(
-                                modifier = Modifier
-                                    .padding(top = 16.dp)
-                                    .pointerInput(Unit) {
-                                        detectTapGestures(
-                                            onTap = {
-                                                val now = System.currentTimeMillis()
-                                                if (now - lastTimeSpoken > 5000L) { // 5 Sekunden Cooldown
-                                                    lastTimeSpoken = now
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    // Spricht die Zeit ohne das Mikrofon des Nutzers zu aktivieren
-                                                    // Nutze currentDate für das genaue Datum (ohne Jahr)
-                                                    val dateFormat = java.text.SimpleDateFormat("EEEE, dd. MMMM", java.util.Locale.GERMANY).also { it.timeZone = java.util.TimeZone.getTimeZone("Europe/Berlin") }
-                                                    val currentDate = dateFormat.format(java.util.Date())
-                                                    val timeString = currentTime.format(formatter)
-                                                    val prompt = "Sage NUR folgenden Satz vor: 'Es ist $timeString Uhr, $currentDate.' Keine Einleitung, kein 'Gerne' und keine sonstigen Wörter hinzufügen!"
-                                                    if (!isSessionActive) {
-                                                        startSessionWithoutMic(prompt)
-                                                    } else {
-                                                        geminiClient.sendClientContent(prompt)
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    },
-                                shape = RoundedCornerShape(24.dp),
-                                color = Color(0xFFF1F5F9), // Leichtes Grau-Blau als edler Hintergrund
-                            ) {
-                                Text(
-                                    text = currentTime.format(formatter),
-                                    color = Color(0xFF1E293B), // Sehr dunkles Grau/Schwarz für starken Kontrast
-                                    fontSize = 72.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp),
-                                    style = MaterialTheme.typography.displayLarge.copy(
-                                        fontFamily = FontFamily(Font(GoogleFont("Roboto"), GoogleFont.Provider("com.google.android.gms.fonts", "com.google.android.gms", R.array.com_google_android_gms_fonts_certs)))
-                                    )
+                        NavigationBarItem(
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.Phone,
+                                    contentDescription = "Telefon",
+                                    modifier = Modifier.size(32.dp)
                                 )
-                            }
-                        }
-
-                        // Mittleres Drittel für den starr fixierten Buttonbereich
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(240.dp)
-                                    .background(
-                                        color = circleColor,
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                AnimatedContent(
-                                    targetState = currentIcon ?: if (isSessionActive) "🎤" else "🎙️",
-                                    label = "iconAnim"
-                                ) { icon ->
-                                    Text(
-                                        text = icon,
-                                        fontSize = 120.sp
-                                    )
-                                }
-                            }
-                        }
-
-                        // Unteres Drittel als leerer Platzhalter für Zukünftiges
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
+                            },
+                            label = {
+                                Text(
+                                    text = "Telefon",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = Color(0xFF4CAF50),
+                                selectedTextColor = Color(0xFF4CAF50),
+                                unselectedIconColor = Color(0xFF94A3B8),
+                                unselectedTextColor = Color(0xFF94A3B8),
+                                indicatorColor = Color(0xFFE8F5E9)
+                            )
+                        )
+                        NavigationBarItem(
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = "Assistent",
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = "Assistent",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = Color(0xFF3B82F6),
+                                selectedTextColor = Color(0xFF3B82F6),
+                                unselectedIconColor = Color(0xFF94A3B8),
+                                unselectedTextColor = Color(0xFF94A3B8),
+                                indicatorColor = Color(0xFFE3F2FD)
+                            )
                         )
                     }
                 }
+
                 } // Ende else (kein aktiver Anruf)
+            }
+        }
+    }
+
+    @Composable
+    private fun VoiceAssistantTab() {
+        // --- ActionState für temporäre Icons ---
+        val currentIcon = ActionStateHolder.currentIcon.value
+
+        // Always Bright White for background so visually impaired users see the screen is on
+        val bgColor = Color(0xFFFAFAFA)
+
+        val circleColor by animateColorAsState(
+            targetValue = if (isSessionActive) Color(0xFF4CAF50) else Color(0xFF3B82F6),
+            animationSpec = tween(500),
+            label = "circleColorAnim"
+        )
+
+        val haptic = LocalHapticFeedback.current
+        val interactionSource = remember { MutableInteractionSource() }
+
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .semantics {
+                    contentDescription = if (isSessionActive) "Mikrofon ist an. Tippen, um Zuhören zu beenden." else "Mikrofon ist aus. Tippen, um mit dem Assistenten zu sprechen."
+                }
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null
+                ) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    toggleAudioSession()
+                },
+            color = bgColor
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // Oberes Drittel für Text/Uhr
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(top = 48.dp, start = 24.dp, end = 24.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    var currentTime by remember { mutableStateOf(LocalTime.now()) }
+                    var lastTimeSpoken by remember { mutableLongStateOf(0L) }
+                    val formatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+
+                    LaunchedEffect(Unit) {
+                        while (true) {
+                            currentTime = LocalTime.now()
+                            delay(1000)
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .padding(top = 16.dp)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onTap = {
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastTimeSpoken > 5000L) { // 5 Sekunden Cooldown
+                                            lastTimeSpoken = now
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            val dateFormat = java.text.SimpleDateFormat("EEEE, dd. MMMM", java.util.Locale.GERMANY).also { it.timeZone = java.util.TimeZone.getTimeZone("Europe/Berlin") }
+                                            val currentDate = dateFormat.format(java.util.Date())
+                                            val timeString = currentTime.format(formatter)
+                                            val prompt = "Sage NUR folgenden Satz vor: 'Es ist $timeString Uhr, $currentDate.' Keine Einleitung, kein 'Gerne' und keine sonstigen Wörter hinzufügen!"
+                                            if (!isSessionActive) {
+                                                startSessionWithoutMic(prompt)
+                                            } else {
+                                                geminiClient.sendClientContent(prompt)
+                                            }
+                                        }
+                                    }
+                                )
+                            },
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color(0xFFF1F5F9),
+                    ) {
+                        Text(
+                            text = currentTime.format(formatter),
+                            color = Color(0xFF1E293B),
+                            fontSize = 72.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp),
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontFamily = FontFamily(Font(GoogleFont("Roboto"), GoogleFont.Provider("com.google.android.gms.fonts", "com.google.android.gms", R.array.com_google_android_gms_fonts_certs)))
+                            )
+                        )
+                    }
+                }
+
+                // Mittleres Drittel für den starr fixierten Buttonbereich
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(240.dp)
+                            .background(
+                                color = circleColor,
+                                shape = CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AnimatedContent(
+                            targetState = currentIcon ?: if (isSessionActive) "🎤" else "🎙️",
+                            label = "iconAnim"
+                        ) { icon ->
+                            Text(
+                                text = icon,
+                                fontSize = 120.sp
+                            )
+                        }
+                    }
+                }
+
+                // Unteres Drittel als leerer Platzhalter
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                )
             }
         }
     }
