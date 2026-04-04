@@ -180,10 +180,10 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
     
     private fun sendInitialSetup(systemPrompt: String) {
         val toolDeclarations = buildToolDeclarations(activeToolGroups)
-        
+
         val setupMessage = buildJsonObject {
             put("setup", buildJsonObject {
-                put("model", "models/gemini-2.5-flash-native-audio-preview-12-2025")
+                put("model", "models/gemini-3.1-flash-live-preview")
                 put("systemInstruction", buildJsonObject {
                     put("parts", buildJsonArray {
                         add(buildJsonObject { put("text", systemPrompt) })
@@ -199,7 +199,7 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
                         })
                     })
                     put("thinkingConfig", buildJsonObject {
-                        put("thinkingBudget", 0)
+                        put("thinkingLevel", "minimal")
                     })
                 })
                 put("tools", buildJsonArray {
@@ -486,14 +486,12 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
         if (isGeminiSpeaking) return
         
         val base64Audio = Base64.encodeToString(pcmData, Base64.NO_WRAP)
-        
+
         val message = buildJsonObject {
             put("realtimeInput", buildJsonObject {
-                put("mediaChunks", buildJsonArray {
-                    add(buildJsonObject {
-                        put("mimeType", "audio/pcm;rate=16000")
-                        put("data", base64Audio)
-                    })
+                put("audio", buildJsonObject {
+                    put("data", base64Audio)
+                    put("mimeType", "audio/pcm;rate=16000")
                 })
             })
         }
@@ -508,24 +506,16 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
     fun sendClientContent(text: String) {
         val ws = webSocket ?: return
         if (!isSetupComplete) return
-        
+
         val message = buildJsonObject {
-            put("clientContent", buildJsonObject {
-                put("turns", buildJsonArray {
-                    add(buildJsonObject {
-                        put("role", "user")
-                        put("parts", buildJsonArray {
-                            add(buildJsonObject { put("text", text) })
-                        })
-                    })
-                })
-                put("turnComplete", true)
+            put("realtimeInput", buildJsonObject {
+                put("text", text)
             })
         }
-        
+
         try {
             ws.send(message.toString())
-            Log.d("GeminiLiveClient", "Sent client content: $text")
+            Log.d("GeminiLiveClient", "Sent realtime text: $text")
         } catch (e: Exception) {
             Log.w("GeminiLiveClient", "sendClientContent fehlgeschlagen (WebSocket geschlossen?): ${e.message}")
         }
