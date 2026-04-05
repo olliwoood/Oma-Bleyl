@@ -544,6 +544,7 @@ class MainActivity : ComponentActivity() {
         // Callback für Anruf-Zusammenfassung registrieren
         CallStateHolder.onCallSummaryReady = { summaryText ->
             runOnUiThread {
+                releaseProximityWakeLock()
                 restoreAssistantVolume()
                 // Falls die Session während des Anrufs gestorben ist (Audio-Fokus verloren),
                 // stellen wir sicher, dass eine neue Session sauber gestartet wird.
@@ -562,6 +563,7 @@ class MainActivity : ComponentActivity() {
         // Callback für eingehenden Anruf: Gemini-Session starten für Sprachsteuerung
         CallStateHolder.onIncomingCallReady = { prompt ->
             runOnUiThread {
+                acquireProximityWakeLock()
                 // Gemini-Lautstärke hochdrehen, damit Ansage neben Klingelton hörbar ist
                 boostAssistantVolume()
                 startSessionWithPrompt(prompt, setOf(ToolGroup.CORE, ToolGroup.COMMUNICATION))
@@ -1309,6 +1311,7 @@ class MainActivity : ComponentActivity() {
                                     com.example.voicelauncher.data.SessionLog.addEvent(applicationContext, "Ausgehender Anruf an ${result.first} gestartet")
                                     
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                        acquireProximityWakeLock()
                                         audioRecorder.stopRecording()
                                         isSessionActive = false
                                         CallStateHolder.callerName.value = result.first
@@ -1973,7 +1976,6 @@ class MainActivity : ComponentActivity() {
             audioRecorder.stopRecording()
             geminiClient.disconnect()
             audioPlayer.stopAndRelease()
-            releaseProximityWakeLock()
             WidgetToggleService.stop(this)
 
             // Haptisches Feedback: Einzelner kurzer Impuls = Session beendet
@@ -1994,7 +1996,6 @@ class MainActivity : ComponentActivity() {
         } else {
             // START
             isSessionActive = true
-            acquireProximityWakeLock()
 
             // Haptisches Feedback: Doppel-Vibration damit die blinde Nutzerin spürt, dass der Assistent startet
             try {
