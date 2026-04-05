@@ -997,20 +997,28 @@ class MainActivity : ComponentActivity() {
 
                                     val projection = arrayOf(
                                         android.provider.CalendarContract.Instances.TITLE,
-                                        android.provider.CalendarContract.Instances.BEGIN
+                                        android.provider.CalendarContract.Instances.BEGIN,
+                                        android.provider.CalendarContract.Instances.ALL_DAY
                                     )
 
                                     val cursor = contentResolver.query(builder.build(), projection, null, null, "${android.provider.CalendarContract.Instances.BEGIN} ASC")
                                     val events = mutableListOf<String>()
                                     if (cursor != null) {
-                                        val sdf = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.GERMANY)
+                                        val sdfDateTime = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.GERMANY)
+                                        val sdfDateOnly = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.GERMANY)
                                         val titleIdx = cursor.getColumnIndex(android.provider.CalendarContract.Instances.TITLE)
                                         val beginIdx = cursor.getColumnIndex(android.provider.CalendarContract.Instances.BEGIN)
+                                        val allDayIdx = cursor.getColumnIndex(android.provider.CalendarContract.Instances.ALL_DAY)
                                         var count = 0
                                         while (cursor.moveToNext() && count < 10) {
                                             val eTitle = cursor.getString(titleIdx) ?: "Ohne Titel"
                                             val eBegin = cursor.getLong(beginIdx)
-                                            events.add("- ${sdf.format(java.util.Date(eBegin))} Uhr: $eTitle")
+                                            val isAllDay = allDayIdx >= 0 && cursor.getInt(allDayIdx) == 1
+                                            if (isAllDay) {
+                                                events.add("- ${sdfDateOnly.format(java.util.Date(eBegin))}: $eTitle (ganztägig)")
+                                            } else {
+                                                events.add("- ${sdfDateTime.format(java.util.Date(eBegin))} Uhr: $eTitle")
+                                            }
                                             count++
                                         }
                                         cursor.close()
@@ -1602,6 +1610,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // Pre-Connect: Gemini-Session sofort aufbauen, damit beim Widget-Tap
+        // kein Cold-Start-Delay entsteht. Die Session bleibt idle bis der User spricht.
+        if (!geminiClient.isSetupComplete && !isSessionActive) {
+            Log.d("MainActivity", "Pre-Connect: Baue Gemini-Verbindung im Hintergrund auf")
+            geminiClient.connect(buildSystemPrompt(), allToolGroups)
+        }
     }
 
     // ========== Native Contact Helper Functions ==========
@@ -1915,7 +1930,8 @@ class MainActivity : ComponentActivity() {
                 android.content.ContentUris.appendId(builder, next24h)
                 val projection = arrayOf(
                     android.provider.CalendarContract.Instances.TITLE,
-                    android.provider.CalendarContract.Instances.BEGIN
+                    android.provider.CalendarContract.Instances.BEGIN,
+                    android.provider.CalendarContract.Instances.ALL_DAY
                 )
                 val cursor = contentResolver.query(builder.build(), projection, null, null, "${android.provider.CalendarContract.Instances.BEGIN} ASC")
                 if (cursor != null) {
@@ -1923,10 +1939,16 @@ class MainActivity : ComponentActivity() {
                     val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).also { it.timeZone = java.util.TimeZone.getTimeZone("Europe/Berlin") }
                     val titleIdx = cursor.getColumnIndex(android.provider.CalendarContract.Instances.TITLE)
                     val beginIdx = cursor.getColumnIndex(android.provider.CalendarContract.Instances.BEGIN)
+                    val allDayIdx = cursor.getColumnIndex(android.provider.CalendarContract.Instances.ALL_DAY)
                     while (cursor.moveToNext()) {
                         val eTitle = cursor.getString(titleIdx) ?: "Ohne Titel"
                         val eBegin = cursor.getLong(beginIdx)
-                        events.add("$eTitle um ${sdf.format(java.util.Date(eBegin))} Uhr")
+                        val isAllDay = allDayIdx >= 0 && cursor.getInt(allDayIdx) == 1
+                        if (isAllDay) {
+                            events.add("$eTitle (ganztägig)")
+                        } else {
+                            events.add("$eTitle um ${sdf.format(java.util.Date(eBegin))} Uhr")
+                        }
                     }
                     cursor.close()
                     if (events.isNotEmpty()) {
@@ -1999,6 +2021,12 @@ class MainActivity : ComponentActivity() {
                 Log.d("MainActivity", "Mikrofon zu bestehender Session (ohne Reconnect) hinzugeschaltet")
                 VoiceLauncherWidget.updateWidget(this, true)
                 return
+            }
+
+            // Mikro sofort starten, damit es warm ist wenn setupComplete kommt.
+            // sendAudio() verwirft Chunks solange !isSetupComplete – kein Problem.
+            audioRecorder.startRecording { audioChunk ->
+                geminiClient.sendAudio(audioChunk)
             }
 
             // User-initiierte Session: Alle Tools laden

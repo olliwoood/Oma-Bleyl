@@ -596,8 +596,10 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
                     }
                 }
                 
-                // turnComplete oder generationComplete → Gemini hat aufgehört zu sprechen
-                if (serverContent.containsKey("turnComplete") || serverContent.containsKey("generationComplete")) {
+                // Nur turnComplete → Turn ist definitiv vorbei, Mikro darf wieder senden.
+                // generationComplete bedeutet nur, dass das Modell fertig generiert hat,
+                // aber Audio-Chunks können noch im Stream unterwegs sein.
+                if (serverContent.containsKey("turnComplete")) {
                     isGeminiSpeaking = false
                     speakingEndedAtMs = System.currentTimeMillis()
                 }
