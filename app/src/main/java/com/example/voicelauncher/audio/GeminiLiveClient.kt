@@ -34,6 +34,10 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
     var isSetupComplete = false
         private set
     private var isUserDisconnect = false
+
+    // Connection-ID: Jede connect()-Aufruf bekommt eine neue ID.
+    // Alte Callbacks (onClosed/onFailure) prüfen ob ihre ID noch aktuell ist.
+    private var connectionId = 0
     
     // Für Auto-Reconnect bei unerwartetem Abbruch
     private var lastSystemPrompt: String? = null
@@ -111,12 +115,16 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
         lastSystemPrompt = systemPrompt
         lastToolGroups = toolGroups
         if (!isReconnect) reconnectAttempts = 0
-        
+
+        // Neue Connection-ID: Alte Callbacks werden ignoriert
+        connectionId++
+        val myConnectionId = connectionId
+
         val url = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=$apiKey"
-        
+
         val requestBuilder = Request.Builder()
             .url(url)
-        
+
         // Android-Identifikation hinzufügen für API-Key-Einschränkung
         context?.let { ctx ->
             requestBuilder.header("X-Android-Package", ctx.packageName)
@@ -124,12 +132,12 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
                 requestBuilder.header("X-Android-Cert", fingerprint)
             }
         }
-        
+
         val request = requestBuilder.build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d("GeminiLiveClient", "WebSocket Connected")
+                Log.d("GeminiLiveClient", "WebSocket Connected (connId=$myConnectionId)")
                 sendInitialSetup(systemPrompt)
             }
 
@@ -142,7 +150,13 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d("GeminiLiveClient", "WebSocket Closed: Code $code, Reason: $reason")
+                Log.d("GeminiLiveClient", "WebSocket Closed: Code $code, Reason: $reason (connId=$myConnectionId, current=$connectionId)")
+                // Callback von alter Verbindung ignorieren
+                if (myConnectionId != connectionId) {
+                    Log.d("GeminiLiveClient", "Alte Verbindung geschlossen, ignoriere (connId=$myConnectionId != current=$connectionId)")
+                    return
+                }
+                this@GeminiLiveClient.webSocket = null
                 isSetupComplete = false
                 if (!isUserDisconnect) {
                     onDisconnected?.invoke()
@@ -151,7 +165,13 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("GeminiLiveClient", "WebSocket Error: ${t.message}", t)
+                Log.e("GeminiLiveClient", "WebSocket Error: ${t.message} (connId=$myConnectionId, current=$connectionId)", t)
+                // Callback von alter Verbindung ignorieren
+                if (myConnectionId != connectionId) {
+                    Log.d("GeminiLiveClient", "Alte Verbindung fehlgeschlagen, ignoriere")
+                    return
+                }
+                this@GeminiLiveClient.webSocket = null
                 isSetupComplete = false
                 isGeminiSpeaking = false
                 
