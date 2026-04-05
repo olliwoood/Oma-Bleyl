@@ -31,8 +31,8 @@ android {
         applicationId = "com.example.voicelauncher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "6.0"
+        versionCode = 7
+        versionName = "7.0"
 
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }

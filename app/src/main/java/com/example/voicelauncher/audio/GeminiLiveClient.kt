@@ -75,6 +75,17 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
 
 
     fun connect(systemPrompt: String, toolGroups: Set<ToolGroup> = setOf(ToolGroup.CORE), isReconnect: Boolean = false) {
+        // Bereits verbunden → nichts tun
+        if (isSetupComplete) {
+            Log.d("GeminiLiveClient", "Bereits verbunden, überspringe connect()")
+            return
+        }
+        // Verbindung wird gerade aufgebaut → nicht doppelt verbinden
+        if (webSocket != null && !isReconnect) {
+            Log.d("GeminiLiveClient", "Verbindung wird bereits aufgebaut, überspringe connect()")
+            return
+        }
+
         // Schutz gegen Zombie-Reconnect: Wenn disconnect() schon aufgerufen wurde,
         // aber ein postDelayed-Timer noch connect() auslöst → abbrechen.
         // Gilt NUR für Reconnects – frische Verbindungen sollen immer funktionieren.
@@ -82,7 +93,7 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
             Log.w("GeminiLiveClient", "Reconnect abgebrochen – disconnect() wurde bereits aufgerufen")
             return
         }
-        
+
         // Neuer Connect-Aufruf → Flag zurücksetzen
         isUserDisconnect = false
         
