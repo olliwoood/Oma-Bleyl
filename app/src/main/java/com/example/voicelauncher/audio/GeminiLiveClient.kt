@@ -436,13 +436,13 @@ class GeminiLiveClient(private val apiKey: String, private val context: Context?
             if (ToolGroup.CONTACTS in groups) {
                 add(buildJsonObject {
                     put("name", "manage_contacts")
-                    put("description", "Kontakte verwalten (create/update). NUR für Name und Geburtstag. Persönliche Infos/Notizen IMMER über handle_memory speichern!")
+                    put("description", "Kontakte bearbeiten (NUR update). KEINE neuen Kontakte erstellen! NUR für Name und Geburtstag. Persönliche Infos/Notizen IMMER über handle_memory speichern!")
                     put("parameters", buildJsonObject {
                         put("type", "OBJECT")
                         put("properties", buildJsonObject {
                             put("action", buildJsonObject {
                                 put("type", "STRING")
-                                put("description", "'create' oder 'update'.")
+                                put("description", "Nur 'update' erlaubt. KEIN 'create'!")
                             })
                             put("name", buildJsonObject { put("type", "STRING") })
                             put("newName", buildJsonObject { put("type", "STRING") })

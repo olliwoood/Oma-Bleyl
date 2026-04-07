@@ -546,17 +546,9 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 releaseProximityWakeLock()
                 restoreAssistantVolume()
-                // Falls die Session während des Anrufs gestorben ist (Audio-Fokus verloren),
-                // stellen wir sicher, dass eine neue Session sauber gestartet wird.
-                if (!geminiClient.isSetupComplete) {
-                    isSessionActive = false
-                    Log.d("MainActivity", "Gemini-Verbindung war weg, starte neue Session für Zusammenfassung")
-                }
-                // Prompt als Backup speichern – falls die Verbindung beim Senden stirbt
-                // (Mobilfunk-Daten brechen bei Anrufen oft ab), wird er beim Reconnect
-                // automatisch über onSetupComplete erneut gesendet.
-                pendingClientPrompt.set(summaryText)
-                startSessionWithPrompt(summaryText)
+                // Nur loggen, keine Session starten nach Anruf
+                Log.d("MainActivity", "Anruf beendet: $summaryText")
+                com.example.voicelauncher.data.SessionLog.addEvent(applicationContext, summaryText)
             }
         }
         
@@ -716,80 +708,13 @@ class MainActivity : ComponentActivity() {
 
                     when (action) {
                         "create" -> {
-                            try {
-                                // Prüfen ob Kontakt bereits existiert
-                                val existingId = findNativeContactId(name)
-                                if (existingId != null) {
-                                    resultString = "Kontakt '$name' existiert bereits. Bitte nutze 'update'."
-                                } else {
-                                    // Neuen Kontakt anlegen
-                                    val ops = ArrayList<android.content.ContentProviderOperation>()
-                                    val rawContactInsertIndex = ops.size
-                                    
-                                    ops.add(android.content.ContentProviderOperation.newInsert(android.provider.ContactsContract.RawContacts.CONTENT_URI)
-                                        .withValue(android.provider.ContactsContract.RawContacts.ACCOUNT_TYPE, null)
-                                        .withValue(android.provider.ContactsContract.RawContacts.ACCOUNT_NAME, null)
-                                        .build())
-                                    
-                                    // Name
-                                    ops.add(android.content.ContentProviderOperation.newInsert(android.provider.ContactsContract.Data.CONTENT_URI)
-                                        .withValueBackReference(android.provider.ContactsContract.Data.RAW_CONTACT_ID, rawContactInsertIndex)
-                                        .withValue(android.provider.ContactsContract.Data.MIMETYPE, android.provider.ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
-                                        .withValue(android.provider.ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, name)
-                                        .build())
-                                    
-                                    // Geburtstag
-                                    if (bDay != null && bMonth != null) {
-                                        val bdayStr = String.format("--%02d-%02d", bMonth, bDay)
-                                        ops.add(android.content.ContentProviderOperation.newInsert(android.provider.ContactsContract.Data.CONTENT_URI)
-                                            .withValueBackReference(android.provider.ContactsContract.Data.RAW_CONTACT_ID, rawContactInsertIndex)
-                                            .withValue(android.provider.ContactsContract.Data.MIMETYPE, android.provider.ContactsContract.CommonDataKinds.Event.CONTENT_ITEM_TYPE)
-                                            .withValue(android.provider.ContactsContract.CommonDataKinds.Event.START_DATE, bdayStr)
-                                            .withValue(android.provider.ContactsContract.CommonDataKinds.Event.TYPE, android.provider.ContactsContract.CommonDataKinds.Event.TYPE_BIRTHDAY)
-                                            .build())
-                                    }
-                                    
-                                    contentResolver.applyBatch(android.provider.ContactsContract.AUTHORITY, ops)
-                                    ActionStateHolder.showIcon("👤")
-                                    resultString = "OK, '$name' angelegt."
-                                }
-                            } catch (e: Exception) {
-                                Log.e("MainActivity", "manage_contacts create fehlgeschlagen", e)
-                                resultString = "Fehler beim Anlegen des Kontakts: ${e.message}"
-                            }
+                            resultString = "Neue Kontakte erstellen ist nicht erlaubt. Alle Kontakte sind bereits im Adressbuch."
                         }
                         "update" -> {
                             try {
                                 val contactId = findNativeContactId(name)
                                 if (contactId == null) {
-                                    // Kontakt existiert noch nicht, also neu anlegen
-                                    val ops = ArrayList<android.content.ContentProviderOperation>()
-                                    val rawContactInsertIndex = ops.size
-                                    
-                                    ops.add(android.content.ContentProviderOperation.newInsert(android.provider.ContactsContract.RawContacts.CONTENT_URI)
-                                        .withValue(android.provider.ContactsContract.RawContacts.ACCOUNT_TYPE, null)
-                                        .withValue(android.provider.ContactsContract.RawContacts.ACCOUNT_NAME, null)
-                                        .build())
-                                    
-                                    ops.add(android.content.ContentProviderOperation.newInsert(android.provider.ContactsContract.Data.CONTENT_URI)
-                                        .withValueBackReference(android.provider.ContactsContract.Data.RAW_CONTACT_ID, rawContactInsertIndex)
-                                        .withValue(android.provider.ContactsContract.Data.MIMETYPE, android.provider.ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
-                                        .withValue(android.provider.ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, newName ?: name)
-                                        .build())
-                                    
-                                    if (bDay != null && bMonth != null) {
-                                        val bdayStr = String.format("--%02d-%02d", bMonth, bDay)
-                                        ops.add(android.content.ContentProviderOperation.newInsert(android.provider.ContactsContract.Data.CONTENT_URI)
-                                            .withValueBackReference(android.provider.ContactsContract.Data.RAW_CONTACT_ID, rawContactInsertIndex)
-                                            .withValue(android.provider.ContactsContract.Data.MIMETYPE, android.provider.ContactsContract.CommonDataKinds.Event.CONTENT_ITEM_TYPE)
-                                            .withValue(android.provider.ContactsContract.CommonDataKinds.Event.START_DATE, bdayStr)
-                                            .withValue(android.provider.ContactsContract.CommonDataKinds.Event.TYPE, android.provider.ContactsContract.CommonDataKinds.Event.TYPE_BIRTHDAY)
-                                            .build())
-                                    }
-                                    
-                                    contentResolver.applyBatch(android.provider.ContactsContract.AUTHORITY, ops)
-                                    ActionStateHolder.showIcon("👤")
-                                    resultString = "OK, '${newName ?: name}' neu angelegt."
+                                    resultString = "Kontakt '$name' nicht gefunden. Neue Kontakte können nicht erstellt werden."
                                 } else {
                                     val rawContactId = getRawContactId(contactId)
                                     if (rawContactId == null) {
